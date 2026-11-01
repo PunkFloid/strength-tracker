@@ -1,4 +1,4 @@
-// app.js - obrazovka pro import souborů a sloučená historie
+// app.js - import souborů, sloučená historie a graf odhadu 1RM
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
@@ -6,11 +6,17 @@ const FORMAT_NAMES = {
 };
 
 const loaded = { macrofactor: null, old: null };
+let mergedSets = [];
+const e1rmState = { exercise: null, period: '1Y' };
+const PERIODS = [['3M', '3 měsíce'], ['1Y', 'Rok'], ['All', 'Vše']];
+const numFmt = new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const dateFmt = d => `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const results = document.getElementById('results');
 const mergedBox = document.getElementById('merged');
+const e1rmBox = document.getElementById('e1rm');
 
 dropzone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => handleFiles(fileInput.files));
@@ -46,7 +52,9 @@ async function handleFiles(fileList) {
 
 function renderMerged() {
   if (!loaded.macrofactor && !loaded.old) return;
-  const { stats } = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
+  const merged = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
+  const stats = merged.stats;
+  mergedSets = merged.sets;
   const mfOnly = !loaded.old, oldOnly = !loaded.macrofactor;
   const unmapped = stats.unmapped.length
     ? `<p class="error">Cviky bez záznamu v tabulce (${stats.unmapped.length}): ${stats.unmapped.map(escapeHtml).join(', ')}</p>`
@@ -65,6 +73,40 @@ function renderMerged() {
       <p class="muted">Série použitelné pro odhad 1RM: <b>${stats.eligibleSets}</b> (z toho odhad RIR ze starého exportu: ${stats.eligibleFromOld}) u <b>${stats.eligibleExercises}</b> cviků</p>
       ${unmapped}
     </section>`;
+  renderE1rm();
+}
+
+function renderE1rm() {
+  const list = E1rm.exerciseList(mergedSets);
+  if (!list.length) { e1rmBox.innerHTML = ''; return; }
+  if (!list.some(e => e.name === e1rmState.exercise)) e1rmState.exercise = list[0].name;
+  const info = list.find(e => e.name === e1rmState.exercise);
+  const data = E1rm.series(E1rm.sessions(mergedSets, info.name), e1rmState.period, new Date());
+  const hasData = data.points.length > 0;
+  const range = !hasData ? '–'
+    : (numFmt.format(data.min) === numFmt.format(data.max) ? numFmt.format(data.min) : `${numFmt.format(data.min)}–${numFmt.format(data.max)}`);
+
+  e1rmBox.innerHTML = `
+    <section class="card e1rm">
+      <h2>Odhad 1RM</h2>
+      <select id="e1rmSelect" class="select">
+        ${list.map(e => `<option value="${escapeHtml(e.name)}"${e.name === info.name ? ' selected' : ''}>${escapeHtml(e.name)} (${e.sessions})</option>`).join('')}
+      </select>
+      <div class="seg">
+        ${PERIODS.map(([k, label]) => `<button data-period="${k}" class="${k === e1rmState.period ? 'on' : ''}">${label}</button>`).join('')}
+      </div>
+      <p class="eyebrow">ODHAD 1RM${info.perHand ? ' · NA JEDNU ČINKU' : ''}</p>
+      <div class="big">${range} <small>kg v 1 opakování</small></div>
+      <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
+      ${hasData ? LineChart.render(data, e1rmState.period) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      <div class="row"><span>Osobní rekord</span><b>${hasData ? numFmt.format(data.pr) + ' kg' : '–'}</b></div>
+      <div class="row"><span>Tvůj průměr</span><b>${hasData ? numFmt.format(data.avg) + ' kg' : '–'}</b></div>
+      <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR ze starého exportu.</p>
+    </section>`;
+
+  e1rmBox.querySelector('#e1rmSelect').addEventListener('change', e => { e1rmState.exercise = e.target.value; renderE1rm(); });
+  e1rmBox.querySelectorAll('.seg button').forEach(b =>
+    b.addEventListener('click', () => { e1rmState.period = b.dataset.period; renderE1rm(); }));
 }
 
 function renderSummary(card, name, s) {
@@ -76,7 +118,7 @@ function renderSummary(card, name, s) {
     <div class="stats">
       <div><b>${s.rowCount}</b><span>řádků</span></div>
       <div><b>${s.dayCount}</b><span>dnů</span></div>
-      <div><b>${Object.keys(s.exercises).length}</b><span>cviků po sloučení</span></div>
+      <div><b>${Object.keys(s.exercises).length}</b><span>cviků</span></div>
     </div>
     <p class="muted">Období: ${s.minDay || '?'} až ${s.maxDay || '?'}</p>
     <h3>Typy sérií</h3>
