@@ -13,6 +13,7 @@ h3 { font-size: 0.8rem; margin: 18px 0 6px; color: #8a8a99; text-transform: uppe
 .dot { color: #e0405e; }
 .muted { color: #8a8a99; }
 .error { color: #e0405e; }
+.ok { color: #7bd88f; margin: 10px 0 0; }
 
 .dropzone {
   display: flex; flex-direction: column; gap: 4px; align-items: center;
@@ -50,6 +51,7 @@ li { margin: 2px 0; }
 .chart { width: 100%; height: auto; margin: 10px 0; display: block; }
 .chart .grid { stroke: #2e2e3d; stroke-width: 1; }
 .chart .axis { fill: #8a8a99; font-size: 11px; }
+.chart .axis.small { font-size: 9px; }
 .chart .line { fill: none; stroke: #e0405e; stroke-width: 2.5; stroke-linejoin: round; }
 .chart .dot { fill: #e0405e; }
 .chart .dot.est { fill: #1a1a24; stroke: #e0405e; stroke-width: 2.5; }
@@ -57,16 +59,10 @@ li { margin: 2px 0; }
 .note { font-size: 0.8rem; margin-top: 12px; }
 .pad { padding: 24px 0; text-align: center; }
 
-.chart .axis.small { font-size: 9px; }
-
-@media (min-width: 900px) {
-  .card.e1rm { max-width: 540px; padding: 12px; }
-  .e1rm h2 { font-size: 0.8rem; }
-  .e1rm .select { font-size: 0.75rem; padding: 9px; margin: 6px 0 9px; }
-  .e1rm .seg button { font-size: 0.72rem; padding: 6px 3px; }
-  .e1rm .eyebrow { font-size: 0.56rem; }
-  .e1rm .big { font-size: 1.8rem; }
-  .e1rm .big small { font-size: 0.72rem; }
-  .e1rm .row { padding: 12px; font-size: 0.75rem; }
-  .e1rm .note { font-size: 0.6rem; }
+.btns { display: flex; gap: 8px; margin-top: 8px; }
+.btns button {
+  flex: 1; padding: 12px; border: 0; border-radius: 12px;
+  background: #3a3a4d; color: #ffffff; font-size: 0.95rem;
 }
+.btns button:disabled { opacity: 0.4; }
+.btns button.danger { background: #4a2330; color: #ff9bb0; }

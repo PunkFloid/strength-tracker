@@ -12,13 +12,14 @@
 <body>
   <main>
     <h1>Strength <span class="dot">Tracker</span></h1>
-    <p class="muted">Přetáhni sem export z MacroFactoru nebo starý export (.csv).</p>
+    <p class="muted">Přetáhni sem export z MacroFactoru, starý export (.csv) nebo zálohu (.json).</p>
 
     <div id="dropzone" class="dropzone">
       <strong>Přetáhni soubor sem</strong>
       <span>nebo klepni a vyber soubor</span>
-      <input id="fileInput" type="file" accept=".csv,.xlsx" multiple hidden>
+      <input id="fileInput" type="file" accept=".csv,.xlsx,.json" multiple hidden>
     </div>
+    <div id="storage"></div>
     <div id="merged"></div>
     <div id="e1rm"></div>
     <div id="results"></div>
@@ -29,6 +30,7 @@
   <script src="normalize.js"></script>
   <script src="e1rm.js"></script>
   <script src="linechart.js"></script>
+  <script src="storage.js"></script>
   <script src="app.js"></script>
 </body>
-</html> 
+</html>

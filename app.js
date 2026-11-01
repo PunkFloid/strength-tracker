@@ -1,20 +1,31 @@
-// app.js - import souborů, sloučená historie a graf odhadu 1RM
+// app.js - import souborů, ukládání dat, sloučená historie a graf odhadu 1RM
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
   unknown: 'Neznámý formát'
 };
+const FORMATS = ['macrofactor', 'old'];
 
-const loaded = { macrofactor: null, old: null };
+const saved = { macrofactor: null, old: null };   // uložené řádky z exportů
+const loaded = { macrofactor: null, old: null };  // z nich spočítané série
 let mergedSets = [];
+let storageNote = '';
 const e1rmState = { exercise: null, period: '1Y' };
 const PERIODS = [['3M', '3 měsíce'], ['1Y', 'Rok'], ['All', 'Vše']];
 const numFmt = new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const dateFmt = d => `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
+const isoToCz = iso => (iso ? dateFmt(new Date(iso)) : '?');
+const wideQuery = window.matchMedia('(min-width: 900px)');
+
+const dayOf = {
+  macrofactor: r => (r['Date'] || '').slice(0, 10),
+  old: r => Parser.pragueDay(r['Date'])
+};
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const results = document.getElementById('results');
+const storageBox = document.getElementById('storage');
 const mergedBox = document.getElementById('merged');
 const e1rmBox = document.getElementById('e1rm');
 
@@ -25,6 +36,97 @@ fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 ['dragleave', 'drop'].forEach(ev =>
   dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('hover'); }));
 dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+wideQuery.addEventListener('change', () => renderE1rm());
+
+// ---------- ukládání ----------
+
+// dny z nového souboru nahradí stejné dny v uložených datech, ostatní dny zůstanou
+function mergeByDay(existing, incoming, getDay) {
+  const newDays = new Set(incoming.map(getDay));
+  return existing.filter(r => !newDays.has(getDay(r))).concat(incoming);
+}
+
+async function addRows(format, rows, fileName) {
+  const cur = saved[format] || { rows: [], files: [] };
+  const next = {
+    rows: mergeByDay(cur.rows, rows, dayOf[format]),
+    updatedAt: new Date().toISOString(),
+    files: [...new Set([...(cur.files || []), fileName])].slice(-10)
+  };
+  await Store.set('rows:' + format, next);
+  saved[format] = next;
+  rebuild();
+}
+
+function rebuild() {
+  loaded.macrofactor = saved.macrofactor ? Normalize.fromMacroFactor(saved.macrofactor.rows) : null;
+  loaded.old = saved.old ? Normalize.fromOld(saved.old.rows) : null;
+}
+
+async function restore() {
+  try {
+    for (const f of FORMATS) saved[f] = (await Store.get('rows:' + f)) || null;
+    await Store.requestPersistent();
+  } catch (err) {
+    storageNote = 'Ukládání v tomto prohlížeči není dostupné (' + err.message + '). Data se po zavření stránky ztratí.';
+  }
+  rebuild();
+  renderStorage();
+  renderMerged();
+}
+
+async function clearAll() {
+  if (!confirm('Opravdu smazat všechna data uložená v tomto zařízení?')) return;
+  for (const f of FORMATS) { await Store.remove('rows:' + f); saved[f] = null; }
+  rebuild();
+  mergedSets = [];
+  mergedBox.innerHTML = '';
+  e1rmBox.innerHTML = '';
+  renderStorage();
+}
+
+async function backup() {
+  const payload = { app: 'strength-tracker', version: 1, exportedAt: new Date().toISOString() };
+  for (const f of FORMATS) payload[f] = saved[f] ? { rows: saved[f].rows } : null;
+  const name = `strength-tracker-zaloha-${new Date().toISOString().slice(0, 10)}.json`;
+  const file = new File([JSON.stringify(payload)], name, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (err) { if (err.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function describeSaved(format) {
+  const s = saved[format];
+  if (!s || !s.rows.length) return `<li>${FORMAT_NAMES[format]}: zatím nic</li>`;
+  const days = s.rows.map(dayOf[format]).filter(Boolean).sort();
+  const nDays = new Set(days).size;
+  return `<li>${FORMAT_NAMES[format]}: ${s.rows.length} řádků, ${nDays} dnů (${days[0]} až ${days[days.length - 1]}), naposledy ${isoToCz(s.updatedAt)}</li>`;
+}
+
+function renderStorage() {
+  const any = FORMATS.some(f => saved[f] && saved[f].rows.length);
+  storageBox.innerHTML = `
+    <section class="card data">
+      <h2>Data v tomto zařízení</h2>
+      <ul>${FORMATS.map(describeSaved).join('')}</ul>
+      ${storageNote ? `<p class="error">${escapeHtml(storageNote)}</p>` : ''}
+      <div class="btns">
+        <button id="backupBtn" ${any ? '' : 'disabled'}>Zálohovat (JSON)</button>
+        <button id="clearBtn" class="danger" ${any ? '' : 'disabled'}>Smazat data</button>
+      </div>
+      <p class="muted note">Data jsou uložená jen v tomto prohlížeči a tomto zařízení. Mac a iPhone mají každý vlastní kopii a apka na ploše iPhonu má úložiště oddělené od Safari. Zálohu (JSON) nahraješ do stejného pole jako CSV.</p>
+    </section>`;
+  storageBox.querySelector('#backupBtn').addEventListener('click', backup);
+  storageBox.querySelector('#clearBtn').addEventListener('click', clearAll);
+}
+
+// ---------- import souborů ----------
 
 async function handleFiles(fileList) {
   for (const file of fileList) {
@@ -37,11 +139,18 @@ async function handleFiles(fileList) {
         continue;
       }
       const text = await file.text();
-      const rows = Parser.parseCSV(text);
-      const summary = Parser.summarize(rows);
-      if (summary.format === 'macrofactor') loaded.macrofactor = Normalize.fromMacroFactor(rows);
-      if (summary.format === 'old') loaded.old = Normalize.fromOld(rows);
-      renderSummary(card, file.name, summary);
+      if (/\.json$/i.test(file.name)) {
+        await importBackup(text, file.name, card);
+      } else {
+        const rows = Parser.parseCSV(text);
+        const summary = Parser.summarize(rows);
+        renderSummary(card, file.name, summary);
+        if (summary.format !== 'unknown') {
+          await addRows(summary.format, rows, file.name);
+          card.insertAdjacentHTML('beforeend', '<p class="ok">Uloženo v tomto zařízení.</p>');
+        }
+      }
+      renderStorage();
       renderMerged();
     } catch (err) {
       card.innerHTML = `<h2>${escapeHtml(file.name)}</h2><p class="error">Soubor se nepodařilo přečíst: ${escapeHtml(err.message)}</p>`;
@@ -50,8 +159,23 @@ async function handleFiles(fileList) {
   fileInput.value = '';
 }
 
+async function importBackup(text, fileName, card) {
+  const data = JSON.parse(text);
+  if (data.app !== 'strength-tracker') throw new Error('To není záloha z této aplikace.');
+  let info = '';
+  for (const f of FORMATS) {
+    if (data[f] && Array.isArray(data[f].rows) && data[f].rows.length) {
+      await addRows(f, data[f].rows, fileName);
+      info += `<li>${FORMAT_NAMES[f]}: ${data[f].rows.length} řádků</li>`;
+    }
+  }
+  card.innerHTML = `<h2>${escapeHtml(fileName)}</h2><p class="format old">Záloha</p><ul>${info || '<li>Záloha je prázdná.</li>'}</ul><p class="ok">Obnoveno do tohoto zařízení.</p>`;
+}
+
+// ---------- zobrazení ----------
+
 function renderMerged() {
-  if (!loaded.macrofactor && !loaded.old) return;
+  if (!loaded.macrofactor && !loaded.old) { mergedSets = []; mergedBox.innerHTML = ''; e1rmBox.innerHTML = ''; return; }
   const merged = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
   const stats = merged.stats;
   mergedSets = merged.sets;
@@ -98,7 +222,7 @@ function renderE1rm() {
       <p class="eyebrow">ODHAD 1RM${info.perHand ? ' · NA JEDNU ČINKU' : ''}</p>
       <div class="big">${range} <small>kg v 1 opakování</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
-      ${hasData ? LineChart.render(data, e1rmState.period) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      ${hasData ? LineChart.render(data, e1rmState.period, wideQuery.matches) : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Osobní rekord</span><b>${hasData ? numFmt.format(data.pr) + ' kg' : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? numFmt.format(data.avg) + ' kg' : '–'}</b></div>
       <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR ze starého exportu.</p>
@@ -131,3 +255,5 @@ function renderSummary(card, name, s) {
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+restore();

@@ -1,6 +1,6 @@
 // linechart.js - jednoduchý SVG čárový graf ve stylu Fitbodu
 const LineChart = (() => {
-  const W = 360, H = 236, LEFT = 6, RIGHT = 36, TOP = 12, BOTTOM = 36;
+  const H = 236, LEFT = 6, RIGHT = 36, TOP = 12, BOTTOM = 36;
   const fmt0 = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 1 });
 
   function niceStep(raw) {
@@ -20,7 +20,9 @@ const LineChart = (() => {
     return ticks;
   }
 
-  function render(data, period) {
+  // wide = true: širší a nižší graf pro velké displeje (Mac, PC)
+  function render(data, period, wide) {
+    const W = wide ? 640 : 360;
     const n = data.buckets.length;
     if (!data.points.length || !n) return '';
     const ticks = ticksFor(data.min, data.max);
