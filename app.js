@@ -1,13 +1,16 @@
-// app.js - obrazovka pro import souborů
+// app.js - obrazovka pro import souborů a sloučená historie
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
   unknown: 'Neznámý formát'
 };
 
+const loaded = { macrofactor: null, old: null };
+
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const results = document.getElementById('results');
+const mergedBox = document.getElementById('merged');
 
 dropzone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => handleFiles(fileInput.files));
@@ -29,12 +32,35 @@ async function handleFiles(fileList) {
       }
       const text = await file.text();
       const rows = Parser.parseCSV(text);
-      renderSummary(card, file.name, Parser.summarize(rows));
+      const summary = Parser.summarize(rows);
+      if (summary.format === 'macrofactor') loaded.macrofactor = Normalize.fromMacroFactor(rows);
+      if (summary.format === 'old') loaded.old = Normalize.fromOld(rows);
+      renderSummary(card, file.name, summary);
+      renderMerged();
     } catch (err) {
       card.innerHTML = `<h2>${escapeHtml(file.name)}</h2><p class="error">Soubor se nepodařilo přečíst: ${escapeHtml(err.message)}</p>`;
     }
   }
   fileInput.value = '';
+}
+
+function renderMerged() {
+  if (!loaded.macrofactor && !loaded.old) return;
+  const { stats } = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
+  const mfOnly = !loaded.old, oldOnly = !loaded.macrofactor;
+  mergedBox.innerHTML = `
+    <section class="card merged">
+      <h2>Sloučená historie</h2>
+      <p class="muted">${oldOnly ? 'Zatím jen starý export.' : mfOnly ? 'Zatím jen MacroFactor.' : 'MacroFactor má přednost, starý export doplňuje dny, které v něm chybí.'}</p>
+      <div class="stats">
+        <div><b>${stats.days}</b><span>tréninkových dnů</span></div>
+        <div><b>${stats.totalSets}</b><span>sérií</span></div>
+        <div><b>${stats.exercises}</b><span>názvů cviků</span></div>
+      </div>
+      <p class="muted">Období: ${stats.minDay} až ${stats.maxDay}</p>
+      <p class="muted">Dny z MacroFactoru: ${stats.daysMF} · dny jen ze starého exportu: ${stats.daysOldKept} · překrývající se dny (použit MacroFactor): ${stats.overlapDays}</p>
+      <p class="muted">Série použitelné pro odhad 1RM: <b>${stats.eligibleSets}</b> (z toho odhad RIR ze starého exportu: ${stats.eligibleFromOld})</p>
+    </section>`;
 }
 
 function renderSummary(card, name, s) {
