@@ -2,6 +2,8 @@
 const Normalize = (() => {
   const RIR_FALLBACK = 1.0;   // náhradní RIR u starého exportu, když se série mění
   const RIR_CAP = 3;          // nejvyšší RIR odhadnuté z pořadí sérií
+  // váha saní, kterou starý export nezapisoval (jen kotouče); doplní se ke každé sérii
+  const OLD_EXTRA_WEIGHT = { '45° Leg Press': 53.5 };
 
   const num = v => {
     if (v === undefined || v === null || String(v).trim() === '') return null;
@@ -72,7 +74,7 @@ const Normalize = (() => {
         known: ex.known,
         perHandFactor: ex.load === 'pair' ? 0.5 : 1,
         category: warm ? 'warmup' : (isDrop ? 'drop' : 'standard'),
-        weight: weight === null ? null : weight * factor,
+        weight: weight === null ? null : weight * factor + (OLD_EXTRA_WEIGHT[ex.canonical] || 0),
         reps: num(r['Reps']),
         rir: null,
         rirEstimated: false,
@@ -116,8 +118,9 @@ const Normalize = (() => {
         overlapDays,
         eligibleSets: eligible.length,
         eligibleFromOld: eligible.filter(s => s.source === 'old').length,
+        eligibleExercises: new Set(eligible.map(s => s.exercise)).size,
         exercises: new Set(all.map(s => s.exercise)).size,
-        unlisted: [...new Set(all.filter(s => !s.known).map(s => s.rawExercise))],
+        unmapped: [...new Set(all.filter(s => !s.known).map(s => s.rawExercise))],
         minDay: all.reduce((m, s) => (!m || s.day < m ? s.day : m), ''),
         maxDay: all.reduce((m, s) => (!m || s.day > m ? s.day : m), '')
       }
