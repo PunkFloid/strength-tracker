@@ -235,7 +235,7 @@ function renderStrength() {
   const vals = key === 'overall' ? result.overall : result.muscles[key];
   const current = vals[vals.length - 1];
   const modeNote = strengthState.mode === 'form'
-    ? 'Forma: průměr posledních výkonů (nejnovější mají největší váhu), po dvou týdnech bez cviku mírný pokles. Vidíš tedy i dopad pauz a slabších tréninků.'
+    ? 'Forma: výkon z posledních tří tréninků cviku (nejnovější váží nejvíc), nový rekord ji zvedne výrazněji a po týdnu bez cviku klesá o 3 % týdně (nejvýš o 30 %). Vidíš tedy dopad pauz i slabších tréninků.'
     : 'Maximum: nejlepší výkon cviku v klouzavém okně. Pauzy skóre nesnižují.';
 
   strengthBox.innerHTML = `

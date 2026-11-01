@@ -4,19 +4,25 @@
 // (každý cvik má vlastní úroveň, trend je pro všechny cviky stejný).
 // Skóre = 50 × (trend vůči průměru prvních 4 týdnů od ANCHOR_DAY).
 // Režimy:
-//   'form' - průměr posledních výkonů (nejnovější mají největší váhu) a po pauze mírný pokles
+//   'form' - výkon z posledních tréninků (nejnovější mají největší váhu), nový rekord ho zvedne
+//            výrazněji a pauza ho postupně snižuje
 //   'max'  - nejlepší výkon v okně
 const Strength = (() => {
   const K_SESSIONS = 3;     // okno cviku má obsahovat aspoň tolik tréninků ...
   const MIN_DAYS = 14;      // ... ale vždy aspoň posledních 14 dní ...
   const MAX_DAYS = 84;      // ... a nejvýš 84 dní zpět
-  const FORM_WEIGHTS = [1, 0.5, 0.25];  // váhy tréninků od nejnovějšího (režim 'form')
-  const GRACE_DAYS = 14;    // pokles po pauze začíná až po tolika dnech bez cviku
-  const DECAY_PER_WEEK = 0.01;          // pokles výkonu za každý další týden bez cviku (1 %)
+  // --- ladění režimu 'form' ---
+  const FORM_WEIGHTS = [1, 0.3, 0.1];  // váhy tréninků od nejnovějšího
+  const PR_BOOST = 0.5;     // nový rekord (nejlepší z posledních tréninků) posune výkon o tuto část k nejnovější hodnotě
+  const GRACE_DAYS = 7;     // pokles po pauze začíná až po tolika dnech bez cviku
+  const DECAY_PER_WEEK = 0.03;         // pokles výkonu za každý další týden bez cviku (3 %)
+  const DECAY_CAP = 0.30;   // největší možný pokles kvůli pauze (30 %)
+  const SMOOTH_FORM = 0.15; // vyhlazení trendu mezi týdny (menší = víc výkyvů)
+  const SMOOTH_MAX = 0.5;
+  // ---
   const GATE_DAYS = 42;     // sval se zobrazí, má-li za tuto dobu aspoň MIN_SETS pracovních sérií
   const MIN_SETS = 6;
   const READY_DAYS = 27;    // sval se začne počítat až 27 dní po prvním tréninku
-  const SMOOTH = 0.5;       // síla vyhlazení trendu mezi sousedními týdny
   const ANCHOR_WEEKS = 4;   // 50 bodů = průměr prvních 4 týdnů od ANCHOR_DAY
   const ANCHOR_DAY = '2025-09-01';      // starší týdny jsou orientační a mohou být pod 50
   const BASE = 50;
@@ -52,6 +58,7 @@ const Strength = (() => {
 
   function compute(sets, today, mode) {
     mode = mode || 'form';
+    const smooth = mode === 'max' ? SMOOTH_MAX : SMOOTH_FORM;
     const work = new Map();      // cvik -> dny pracovních sérií
     const daily = new Map();     // cvik -> (den -> nejlepší výkon z použitelných sérií)
     let minT = Infinity;
@@ -96,8 +103,12 @@ const Strength = (() => {
         } else {
           let num = 0, den = 0;
           chosen.forEach((c, n) => { const w = FORM_WEIGHTS[Math.min(n, FORM_WEIGHTS.length - 1)]; num += w * c.v; den += w; });
+          let val = num / den;
+          // nový rekord: nejnovější výkon je lepší než všechny starší v okně
+          if (chosen.length > 1 && chosen[0].v > Math.max(...chosen.slice(1).map(c => c.v))) val += PR_BOOST * (chosen[0].v - val);
           const age = ts - chosen[0].t;
-          E.set(ex, (num / den) * Math.exp(-DECAY_PER_WEEK * Math.max(0, age - GRACE_DAYS) / 7));
+          const decay = Math.min(DECAY_CAP, DECAY_PER_WEEK * Math.max(0, age - GRACE_DAYS) / 7);
+          E.set(ex, val * Math.exp(-decay));
         }
       }
       return E;
@@ -138,7 +149,7 @@ const Strength = (() => {
         N[i][i] += w; N[c][c] += w; N[i][c] += w; N[c][i] += w; b[i] += w * y; b[c] += w * y;
       }
       for (let i = 0; i < K - 1; i++) {
-        N[i][i] += SMOOTH; N[i + 1][i + 1] += SMOOTH; N[i][i + 1] -= SMOOTH; N[i + 1][i] -= SMOOTH;
+        N[i][i] += smooth; N[i + 1][i + 1] += smooth; N[i][i + 1] -= smooth; N[i + 1][i] -= smooth;
       }
       // kotva: průměr prvních týdnů od ANCHOR_DAY = 0 (50 bodů)
       let anc = [];
