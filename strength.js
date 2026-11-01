@@ -1,23 +1,31 @@
 // strength.js - skóre síly (Overall + 7 svalů)
-// Metoda: pro každý cvik se týden po týdnu určí nejlepší odhad 1RM v klouzavém okně
-// (okno se podle četnosti cviku zkracuje nebo prodlužuje). Pro každý sval se pak odhadne
-// jeden společný trend (každý cvik má vlastní úroveň, trend je pro všechny cviky stejný).
-// Skóre = 50 × (trend vůči průměru prvních 4 týdnů).
+// Metoda: pro každý cvik se týden po týdnu určí výkon v klouzavém okně (okno se podle četnosti
+// cviku zkracuje nebo prodlužuje). Pro každý sval se pak odhadne jeden společný trend
+// (každý cvik má vlastní úroveň, trend je pro všechny cviky stejný).
+// Skóre = 50 × (trend vůči průměru prvních 4 týdnů od ANCHOR_DAY).
+// Režimy:
+//   'form' - průměr posledních výkonů (nejnovější mají největší váhu) a po pauze mírný pokles
+//   'max'  - nejlepší výkon v okně
 const Strength = (() => {
   const K_SESSIONS = 3;     // okno cviku má obsahovat aspoň tolik tréninků ...
   const MIN_DAYS = 14;      // ... ale vždy aspoň posledních 14 dní ...
   const MAX_DAYS = 84;      // ... a nejvýš 84 dní zpět
+  const FORM_WEIGHTS = [1, 0.5, 0.25];  // váhy tréninků od nejnovějšího (režim 'form')
+  const GRACE_DAYS = 14;    // pokles po pauze začíná až po tolika dnech bez cviku
+  const DECAY_PER_WEEK = 0.01;          // pokles výkonu za každý další týden bez cviku (1 %)
   const GATE_DAYS = 42;     // sval se zobrazí, má-li za tuto dobu aspoň MIN_SETS pracovních sérií
   const MIN_SETS = 6;
   const READY_DAYS = 27;    // sval se začne počítat až 27 dní po prvním tréninku
   const SMOOTH = 0.5;       // síla vyhlazení trendu mezi sousedními týdny
-  const ANCHOR_WEEKS = 4;   // 50 bodů = průměr prvních 4 týdnů svalu
+  const ANCHOR_WEEKS = 4;   // 50 bodů = průměr prvních 4 týdnů od ANCHOR_DAY
+  const ANCHOR_DAY = '2025-09-01';      // starší týdny jsou orientační a mohou být pod 50
   const BASE = 50;
   const STEP = 7;
   const DAY = 86400000;
 
   const toNum = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY; };
   const toIso = n => new Date(n * DAY).toISOString().slice(0, 10);
+  const ANCHOR_N = toNum(ANCHOR_DAY);
 
   // řešení soustavy A x = b (Gaussova eliminace s výběrem pivotu)
   function solve(A, b) {
@@ -42,7 +50,8 @@ const Strength = (() => {
     return x;
   }
 
-  function compute(sets, today) {
+  function compute(sets, today, mode) {
+    mode = mode || 'form';
     const work = new Map();      // cvik -> dny pracovních sérií
     const daily = new Map();     // cvik -> (den -> nejlepší výkon z použitelných sérií)
     let minT = Infinity;
@@ -74,20 +83,28 @@ const Strength = (() => {
       for (const [ex, arr] of sess) {
         let i = arr.length - 1;
         while (i >= 0 && arr[i].t > ts) i--;
-        let best = null, count = 0;
+        const chosen = [];                       // od nejnovějšího
         for (let j = i; j >= 0; j--) {
           const { t, v } = arr[j];
           if (t <= ts - MAX_DAYS) break;
-          if (t > ts - MIN_DAYS || count < K_SESSIONS) { count++; if (best === null || v > best) best = v; }
+          if (t > ts - MIN_DAYS || chosen.length < K_SESSIONS) chosen.push({ t, v });
           else break;
         }
-        if (best !== null) E.set(ex, best);
+        if (!chosen.length) continue;
+        if (mode === 'max') {
+          E.set(ex, Math.max(...chosen.map(c => c.v)));
+        } else {
+          let num = 0, den = 0;
+          chosen.forEach((c, n) => { const w = FORM_WEIGHTS[Math.min(n, FORM_WEIGHTS.length - 1)]; num += w * c.v; den += w; });
+          const age = ts - chosen[0].t;
+          E.set(ex, (num / den) * Math.exp(-DECAY_PER_WEEK * Math.max(0, age - GRACE_DAYS) / 7));
+        }
       }
       return E;
     };
     const Es = dates.map(perf);
 
-    const out = { dates, overall: [], muscles: {} };
+    const out = { dates, overall: [], muscles: {}, anchorN: ANCHOR_N, mode };
     for (const [key] of Muscles.LIST) {
       out.muscles[key] = new Array(dates.length).fill(null);
       const exs = [];
@@ -123,14 +140,18 @@ const Strength = (() => {
       for (let i = 0; i < K - 1; i++) {
         N[i][i] += SMOOTH; N[i + 1][i + 1] += SMOOTH; N[i][i + 1] -= SMOOTH; N[i + 1][i] -= SMOOTH;
       }
-      const m0 = Math.min(ANCHOR_WEEKS, K);       // průměr prvních týdnů = 0
-      for (let i = 0; i < m0; i++) for (let j = 0; j < m0; j++) N[i][j] += 1e4 / (m0 * m0);
+      // kotva: průměr prvních týdnů od ANCHOR_DAY = 0 (50 bodů)
+      let anc = [];
+      active.forEach((k, i) => { if (dates[k] >= ANCHOR_N && anc.length < ANCHOR_WEEKS) anc.push(i); });
+      if (!anc.length) for (let i = 0; i < Math.min(ANCHOR_WEEKS, K); i++) anc.push(i);
+      for (const i of anc) for (const j of anc) N[i][j] += 1e4 / (anc.length * anc.length);
       const x = solve(N, b);
       active.forEach((k, i) => { out.muscles[key][k] = BASE * Math.exp(x[i]); });
     }
 
     // celkové skóre: průměrná změna svalů, které byly aktivní v předchozím i tomto týdnu
     let overall = null, prev = {};
+    const ov = [];
     dates.forEach((ts, k) => {
       const now = {};
       for (const [key] of Muscles.LIST) if (out.muscles[key][k] !== null) now[key] = out.muscles[key][k];
@@ -138,17 +159,22 @@ const Strength = (() => {
       for (const key in now) if (prev[key] !== undefined) { logSum += Math.log(now[key] / prev[key]); c++; }
       if (overall === null) { if (Object.keys(now).length) overall = BASE; }
       else if (c > 0) overall *= Math.exp(logSum / c);
-      out.overall.push(Object.keys(now).length ? overall : null);
+      ov.push(Object.keys(now).length ? overall : null);
       if (Object.keys(now).length) prev = now;
     });
+    const aIdx = [];
+    ov.forEach((v, k) => { if (v !== null && dates[k] >= ANCHOR_N && aIdx.length < ANCHOR_WEEKS) aIdx.push(k); });
+    const scale = aIdx.length ? BASE / (aIdx.reduce((s, k) => s + ov[k], 0) / aIdx.length) : 1;
+    out.overall = ov.map(v => (v === null ? null : v * scale));
     return out;
   }
 
-  // převod na "sessions" pro E1rm.series (bod = nejvyšší skóre v týdnu/měsíci)
+  // převod na "sessions" pro E1rm.series (bod = nejvyšší skóre v týdnu/měsíci);
+  // týdny před ANCHOR_DAY jsou orientační (prázdné kolečko)
   function sessionsFor(result, key) {
     const vals = key === 'overall' ? result.overall : result.muscles[key];
     const out = [];
-    result.dates.forEach((d, i) => { if (vals[i] !== null) out.push({ day: toIso(d), value: vals[i], estimated: false }); });
+    result.dates.forEach((d, i) => { if (vals[i] !== null) out.push({ day: toIso(d), value: vals[i], estimated: d < result.anchorN }); });
     return out;
   }
 
