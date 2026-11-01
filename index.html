@@ -7,6 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Strength">
   <title>Strength Tracker</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -19,10 +21,10 @@
       <span>nebo klepni a vyber soubor</span>
       <input id="fileInput" type="file" accept=".csv,.xlsx,.json" multiple hidden>
     </div>
+    <div id="strength"></div>
+    <div id="e1rm"></div>
     <div id="storage"></div>
     <div id="merged"></div>
-        <div id="strength"></div>
-    <div id="e1rm"></div>
     <div id="results"></div>
   </main>
 
@@ -30,10 +32,18 @@
   <script src="exercises.js"></script>
   <script src="normalize.js"></script>
   <script src="e1rm.js"></script>
-    <script src="muscles.js"></script>
+  <script src="muscles.js"></script>
   <script src="strength.js"></script>
   <script src="linechart.js"></script>
   <script src="storage.js"></script>
   <script src="app.js"></script>
+  <script>
+    // offline režim
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker se nezaregistroval:', err));
+      });
+    }
+  </script>
 </body>
 </html>
