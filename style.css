@@ -66,3 +66,9 @@ li { margin: 2px 0; }
 }
 .btns button:disabled { opacity: 0.4; }
 .btns button.danger { background: #4a2330; color: #ff9bb0; }
+
+.tip { margin: 10px 0 0; min-height: 1.3em; font-size: 0.8rem; }
+.tip.on { color: #ffffff; }
+.tip + .chart { margin-top: 4px; }
+.chart .hit { fill: rgba(0, 0, 0, 0.001); cursor: pointer; }
+.chart .dot.sel { stroke: #ffffff; stroke-width: 2; }

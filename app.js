@@ -236,7 +236,7 @@ function renderStrength() {
       <p class="eyebrow">SKÓRE SÍLY</p>
       <div class="big">${range} <small>bodů</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
-      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches, v => intFmt.format(v) + ' bodů') : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.max) : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? intFmt.format(data.avg) : '–'}</b></div>
       <div class="row"><span>Aktuálně</span><b>${current === null ? 'málo dat' : intFmt.format(current)}</b></div>
@@ -270,7 +270,7 @@ function renderE1rm() {
       <p class="eyebrow">ODHAD 1RM${info.perHand ? ' · NA JEDNU ČINKU' : ''}</p>
       <div class="big">${range} <small>kg v 1 opakování</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
-      ${hasData ? LineChart.render(data, e1rmState.period, wideQuery.matches) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      ${hasData ? LineChart.render(data, e1rmState.period, wideQuery.matches, v => numFmt.format(v) + ' kg') : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Osobní rekord</span><b>${hasData ? numFmt.format(data.pr) + ' kg' : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? numFmt.format(data.avg) + ' kg' : '–'}</b></div>
       <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR ze starého exportu.</p>
