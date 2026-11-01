@@ -1,4 +1,4 @@
-// app.js - import souborů, ukládání dat, sloučená historie a graf odhadu 1RM
+// app.js - import souborů, ukládání dat, sloučená historie, skóre síly a graf odhadu 1RM
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
@@ -9,10 +9,13 @@ const FORMATS = ['macrofactor', 'old'];
 const saved = { macrofactor: null, old: null };   // uložené řádky z exportů
 const loaded = { macrofactor: null, old: null };  // z nich spočítané série
 let mergedSets = [];
+let strengthResult = null;
 let storageNote = '';
 const e1rmState = { exercise: null, period: '1Y' };
+const strengthState = { key: 'overall', period: '1Y' };
 const PERIODS = [['3M', '3 měsíce'], ['1Y', 'Rok'], ['All', 'Vše']];
 const numFmt = new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const intFmt = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 });
 const dateFmt = d => `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
 const isoToCz = iso => (iso ? dateFmt(new Date(iso)) : '?');
 const wideQuery = window.matchMedia('(min-width: 900px)');
@@ -27,6 +30,7 @@ const fileInput = document.getElementById('fileInput');
 const results = document.getElementById('results');
 const storageBox = document.getElementById('storage');
 const mergedBox = document.getElementById('merged');
+const strengthBox = document.getElementById('strength');
 const e1rmBox = document.getElementById('e1rm');
 
 dropzone.addEventListener('click', () => fileInput.click());
@@ -36,7 +40,7 @@ fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 ['dragleave', 'drop'].forEach(ev =>
   dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('hover'); }));
 dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
-wideQuery.addEventListener('change', () => renderE1rm());
+wideQuery.addEventListener('change', () => { renderStrength(); renderE1rm(); });
 
 // ---------- ukládání ----------
 
@@ -80,7 +84,9 @@ async function clearAll() {
   for (const f of FORMATS) { await Store.remove('rows:' + f); saved[f] = null; }
   rebuild();
   mergedSets = [];
+  strengthResult = null;
   mergedBox.innerHTML = '';
+  strengthBox.innerHTML = '';
   e1rmBox.innerHTML = '';
   renderStorage();
 }
@@ -175,7 +181,11 @@ async function importBackup(text, fileName, card) {
 // ---------- zobrazení ----------
 
 function renderMerged() {
-  if (!loaded.macrofactor && !loaded.old) { mergedSets = []; mergedBox.innerHTML = ''; e1rmBox.innerHTML = ''; return; }
+  if (!loaded.macrofactor && !loaded.old) {
+    mergedSets = []; strengthResult = null;
+    mergedBox.innerHTML = ''; strengthBox.innerHTML = ''; e1rmBox.innerHTML = '';
+    return;
+  }
   const merged = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
   const stats = merged.stats;
   mergedSets = merged.sets;
@@ -197,7 +207,45 @@ function renderMerged() {
       <p class="muted">Série použitelné pro odhad 1RM: <b>${stats.eligibleSets}</b> (z toho odhad RIR ze starého exportu: ${stats.eligibleFromOld}) u <b>${stats.eligibleExercises}</b> cviků</p>
       ${unmapped}
     </section>`;
+  strengthResult = Strength.compute(mergedSets, new Date());
+  renderStrength();
   renderE1rm();
+}
+
+function renderStrength() {
+  if (!strengthResult) { strengthBox.innerHTML = ''; return; }
+  const keys = [['overall', 'Overall'], ...Muscles.LIST];
+  const key = strengthState.key;
+  const data = E1rm.series(Strength.sessionsFor(strengthResult, key), strengthState.period, new Date());
+  const hasData = data.points.length > 0;
+  const lo = hasData ? intFmt.format(data.min) : '–';
+  const hi = hasData ? intFmt.format(data.max) : '–';
+  const range = !hasData ? '–' : (lo === hi ? lo : `${lo}–${hi}`);
+  const vals = key === 'overall' ? strengthResult.overall : strengthResult.muscles[key];
+  const current = vals[vals.length - 1];
+
+  strengthBox.innerHTML = `
+    <section class="card strength">
+      <h2>Skóre síly</h2>
+      <select id="strengthSelect" class="select">
+        ${keys.map(([k, label]) => `<option value="${k}"${k === key ? ' selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <div class="seg">
+        ${PERIODS.map(([k, label]) => `<button data-period="${k}" class="${k === strengthState.period ? 'on' : ''}">${label}</button>`).join('')}
+      </div>
+      <p class="eyebrow">SKÓRE SÍLY</p>
+      <div class="big">${range} <small>bodů</small></div>
+      <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
+      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.max) : '–'}</b></div>
+      <div class="row"><span>Tvůj průměr</span><b>${hasData ? intFmt.format(data.avg) : '–'}</b></div>
+      <div class="row"><span>Aktuálně</span><b>${current === null ? 'málo dat' : intFmt.format(current)}</b></div>
+      <p class="muted note">Skóre začíná na 50 na začátku tvé historie a počítá se z odhadů 1RM všech cviků na daný sval. Hodnota 60 znamená o 20 % vyšší odhad síly než na začátku. Sval se zobrazí, jen když má v posledních 28 dnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR.</p>
+    </section>`;
+
+  strengthBox.querySelector('#strengthSelect').addEventListener('change', e => { strengthState.key = e.target.value; renderStrength(); });
+  strengthBox.querySelectorAll('.seg button').forEach(b =>
+    b.addEventListener('click', () => { strengthState.period = b.dataset.period; renderStrength(); }));
 }
 
 function renderE1rm() {
