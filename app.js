@@ -1,4 +1,4 @@
-// app.js - import souborů, ukládání dat, skóre síly, tréninky v čase, odhad 1RM
+// app.js - import souborů, ukládání dat, skóre síly a odhad 1RM
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
@@ -13,7 +13,6 @@ let strengthResults = null;
 let storageNote = '';
 const e1rmState = { exercise: null, period: '1Y' };
 const strengthState = { key: 'overall', period: '1Y', mode: 'form' };
-const workoutsState = { period: '1Y' };
 const PERIODS = [['3M', '3 měsíce'], ['1Y', 'Rok'], ['All', 'Vše']];
 const MODES = [['form', 'Forma'], ['max', 'Maximum']];
 const numFmt = new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -33,7 +32,6 @@ const results = document.getElementById('results');
 const storageBox = document.getElementById('storage');
 const mergedBox = document.getElementById('merged');
 const strengthBox = document.getElementById('strength');
-const workoutsBox = document.getElementById('workouts');
 const e1rmBox = document.getElementById('e1rm');
 
 dropzone.addEventListener('click', () => fileInput.click());
@@ -43,7 +41,7 @@ fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 ['dragleave', 'drop'].forEach(ev =>
   dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('hover'); }));
 dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
-wideQuery.addEventListener('change', () => { renderStrength(); renderWorkouts(); renderE1rm(); });
+wideQuery.addEventListener('change', () => { renderStrength(); renderE1rm(); });
 
 // ---------- ukládání ----------
 
@@ -90,7 +88,6 @@ async function clearAll() {
   strengthResults = null;
   mergedBox.innerHTML = '';
   strengthBox.innerHTML = '';
-  workoutsBox.innerHTML = '';
   e1rmBox.innerHTML = '';
   renderStorage();
 }
@@ -187,7 +184,7 @@ async function importBackup(text, fileName, card) {
 function renderMerged() {
   if (!loaded.macrofactor && !loaded.old) {
     mergedSets = []; strengthResults = null;
-    mergedBox.innerHTML = ''; strengthBox.innerHTML = ''; workoutsBox.innerHTML = ''; e1rmBox.innerHTML = '';
+    mergedBox.innerHTML = ''; strengthBox.innerHTML = ''; e1rmBox.innerHTML = '';
     return;
   }
   const merged = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
@@ -214,20 +211,27 @@ function renderMerged() {
   const today = new Date();
   strengthResults = { form: Strength.compute(mergedSets, today, 'form'), max: Strength.compute(mergedSets, today, 'max') };
   renderStrength();
-  renderWorkouts();
   renderE1rm();
 }
 
 function renderStrength() {
-  const result = strengthResults && strengthResults[strengthState.mode];
-  if (!result) { strengthBox.innerHTML = ''; return; }
+  if (!strengthResults || !strengthResults[strengthState.mode]) { strengthBox.innerHTML = ''; return; }
   const keys = [['overall', 'Overall'], ...Muscles.LIST];
   const key = strengthState.key;
-  const data = E1rm.series(Strength.sessionsFor(result, key), strengthState.period, new Date());
+  const today = new Date();
+
+  // obě varianty (Forma i Maximum) se počítají vždy a osa Y je pro ně společná
+  const byMode = {};
+  for (const [m] of MODES) byMode[m] = E1rm.series(Strength.sessionsFor(strengthResults[m], key), strengthState.period, today);
+  const withData = Object.values(byMode).filter(d => d.points.length > 0);
+  const yRange = withData.length ? { min: Math.min(...withData.map(d => d.min)), max: Math.max(...withData.map(d => d.max)) } : null;
+
+  const data = byMode[strengthState.mode];
   const hasData = data.points.length > 0;
   const lo = hasData ? intFmt.format(data.min) : '–';
   const hi = hasData ? intFmt.format(data.max) : '–';
   const range = !hasData ? '–' : (lo === hi ? lo : `${lo}–${hi}`);
+  const result = strengthResults[strengthState.mode];
   const vals = key === 'overall' ? result.overall : result.muscles[key];
   const current = vals[vals.length - 1];
   const modeNote = strengthState.mode === 'form'
@@ -249,11 +253,11 @@ function renderStrength() {
       <p class="eyebrow">SKÓRE SÍLY · ${strengthState.mode === 'form' ? 'FORMA' : 'MAXIMUM'}</p>
       <div class="big">${range} <small>bodů</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
-      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches, yRange) : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.max) : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? intFmt.format(data.avg) : '–'}</b></div>
       <div class="row"><span>Aktuálně</span><b>${current === null ? 'málo dat' : intFmt.format(current)}</b></div>
-      <p class="muted note">${modeNote} 50 bodů odpovídá průměru prvních čtyř týdnů od září 2025, hodnota 60 znamená o 20 % vyšší odhad síly. Týdny před 1. 9. 2025 jsou orientační (prázdné kolečko) a mohou být pod 50. Sval se zobrazí, jen když má v posledních 6 týdnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR. Starší týdny se po nahrání nových dat mohou lehce posunout.</p>
+      <p class="muted note">${modeNote} Osa Y je pro Formu i Maximum stejná, takže je můžeš přímo porovnat. 50 bodů odpovídá průměru prvních čtyř týdnů od září 2025, hodnota 60 znamená o 20 % vyšší odhad síly. Týdny před 1. 9. 2025 jsou orientační (prázdné kolečko) a mohou být pod 50. Sval se zobrazí, jen když má v posledních 6 týdnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR. Starší týdny se po nahrání nových dat mohou lehce posunout.</p>
     </section>`;
 
   strengthBox.querySelector('#strengthSelect').addEventListener('change', e => { strengthState.key = e.target.value; renderStrength(); });
@@ -261,33 +265,6 @@ function renderStrength() {
     b.addEventListener('click', () => { strengthState.period = b.dataset.period; renderStrength(); }));
   strengthBox.querySelectorAll('.seg[data-kind="mode"] button').forEach(b =>
     b.addEventListener('click', () => { strengthState.mode = b.dataset.mode; renderStrength(); }));
-}
-
-function renderWorkouts() {
-  if (!mergedSets.length) { workoutsBox.innerHTML = ''; return; }
-  const days = Calendar.trainingDays(mergedSets);
-  const data = Calendar.weekly(days, workoutsState.period, new Date());
-  const pauses = [...data.pauses].sort((a, b) => b.from - a.from).slice(0, 10);
-  workoutsBox.innerHTML = `
-    <section class="card workouts">
-      <h2>Tréninky v čase</h2>
-      <div class="seg">
-        ${PERIODS.map(([k, label]) => `<button data-period="${k}" class="${k === workoutsState.period ? 'on' : ''}">${label}</button>`).join('')}
-      </div>
-      <p class="eyebrow">TRÉNINKY ZA TÝDEN</p>
-      <div class="big">${numFmt.format(data.perWeek)} <small>v průměru</small></div>
-      <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
-      ${BarChart.render(data, wideQuery.matches)}
-      <div class="row"><span>Tréninků v období</span><b>${data.total}</b></div>
-      <div class="row"><span>Nejdelší pauza</span><b>${data.longest ? data.longest.rest + ' dní' : '–'}</b></div>
-      <h3>Pauzy (7 a více dní bez tréninku)</h3>
-      ${pauses.length
-        ? `<ul>${pauses.map(p => `<li>${dateFmt(p.from)} – ${dateFmt(p.to)} <span class="muted">· ${p.rest} dní${p.ongoing ? ' (probíhá)' : ''}</span></li>`).join('')}</ul>`
-        : '<p class="muted">V tomto období žádné.</p>'}
-      <p class="muted note">Trénink = den, ve kterém je zaznamenaná aspoň jedna série (z MacroFactoru nebo ze starého exportu). Červeně podbarvené týdny jsou týdny bez tréninku.</p>
-    </section>`;
-  workoutsBox.querySelectorAll('.seg button').forEach(b =>
-    b.addEventListener('click', () => { workoutsState.period = b.dataset.period; renderWorkouts(); }));
 }
 
 function renderE1rm() {

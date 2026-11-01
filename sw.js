@@ -1,9 +1,9 @@
 // sw.js - offline režim: nejdřív síť, při výpadku nebo pomalém spojení uložená kopie
-const CACHE = 'strength-tracker-v2';
+const CACHE = 'strength-tracker-v3';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
   'parser.js', 'exercises.js', 'normalize.js', 'e1rm.js', 'muscles.js', 'strength.js',
-  'calendar.js', 'linechart.js', 'barchart.js', 'storage.js', 'app.js',
+  'linechart.js', 'storage.js', 'app.js',
   'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'
 ];
 const NETWORK_TIMEOUT_MS = 4000;
