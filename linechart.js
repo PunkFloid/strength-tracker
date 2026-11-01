@@ -1,7 +1,6 @@
 // linechart.js - jednoduchý SVG čárový graf ve stylu Fitbodu
 const LineChart = (() => {
-  const W = 360, H = 230, LEFT = 6, RIGHT = 36, TOP = 12, BOTTOM = 26;
-  const INITIALS = ['L', 'Ú', 'B', 'D', 'K', 'Č', 'Č', 'S', 'Z', 'Ř', 'L', 'P'];
+  const W = 360, H = 236, LEFT = 6, RIGHT = 36, TOP = 12, BOTTOM = 36;
   const fmt0 = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 1 });
 
   function niceStep(raw) {
@@ -40,14 +39,18 @@ const LineChart = (() => {
       svg += `<line x1="${LEFT}" y1="${y(t)}" x2="${LEFT + pw}" y2="${y(t)}" class="grid"/>`;
       svg += `<text x="${W - RIGHT + 6}" y="${y(t) + 4}" class="axis">${fmt0.format(t)}</text>`;
     }
-    // popisky osy X
+    // popisky osy X: číslo měsíce, u ledna a prvního popisku navíc rok
     let lastMonth = -1;
     data.buckets.forEach((b, i) => {
       const m = b.start.getMonth();
       let show;
       if (period === '3M') { show = m !== lastMonth; lastMonth = m; }
       else show = n <= 16 || m % 3 === 0;
-      if (show) svg += `<text x="${xC(i)}" y="${H - 8}" text-anchor="middle" class="axis">${INITIALS[m]}</text>`;
+      if (!show) return;
+      svg += `<text x="${xC(i)}" y="${H - 20}" text-anchor="middle" class="axis">${m + 1}</text>`;
+      if (m === 0 || i === 0) {
+        svg += `<text x="${xC(i)}" y="${H - 7}" text-anchor="middle" class="axis small">’${String(b.start.getFullYear()).slice(2)}</text>`;
+      }
     });
     // čára a body
     const pts = data.buckets.map((b, i) => (b.value === null ? null : { x: xC(i), y: y(b.value), est: b.estimated })).filter(Boolean);

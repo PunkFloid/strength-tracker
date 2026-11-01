@@ -56,3 +56,17 @@ li { margin: 2px 0; }
 .row { display: flex; justify-content: space-between; padding: 16px; margin-top: 8px; border-radius: 12px; background: #1a1a24; }
 .note { font-size: 0.8rem; margin-top: 12px; }
 .pad { padding: 24px 0; text-align: center; }
+
+.chart .axis.small { font-size: 9px; }
+
+@media (min-width: 900px) {
+  .card.e1rm { max-width: 540px; padding: 12px; }
+  .e1rm h2 { font-size: 0.8rem; }
+  .e1rm .select { font-size: 0.75rem; padding: 9px; margin: 6px 0 9px; }
+  .e1rm .seg button { font-size: 0.72rem; padding: 6px 3px; }
+  .e1rm .eyebrow { font-size: 0.56rem; }
+  .e1rm .big { font-size: 1.8rem; }
+  .e1rm .big small { font-size: 0.72rem; }
+  .e1rm .row { padding: 12px; font-size: 0.75rem; }
+  .e1rm .note { font-size: 0.6rem; }
+}
