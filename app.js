@@ -204,7 +204,7 @@ function renderMerged() {
       </div>
       <p class="muted">Období: ${stats.minDay} až ${stats.maxDay}</p>
       <p class="muted">Dny z MacroFactoru: ${stats.daysMF} · dny jen ze starého exportu: ${stats.daysOldKept} · překrývající se dny (použit MacroFactor): ${stats.overlapDays}</p>
-      <p class="muted">Série použitelné pro odhad 1RM: <b>${stats.eligibleSets}</b> (z toho odhad RIR ze starého exportu: ${stats.eligibleFromOld}) u <b>${stats.eligibleExercises}</b> cviků</p>
+      <p class="muted">Série použitelné pro odhad 1RM: <b>${stats.eligibleSets}</b> (z toho odhad RIR ze starého exportu: ${stats.eligibleFromOld}, doplněné RIR u nohou: ${stats.eligibleLegsAssumed}) u <b>${stats.eligibleExercises}</b> cviků. Série před 1. 8. 2025 se nepočítají.</p>
       ${unmapped}
     </section>`;
   strengthResult = Strength.compute(mergedSets, new Date());
@@ -240,7 +240,7 @@ function renderStrength() {
       <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.max) : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? intFmt.format(data.avg) : '–'}</b></div>
       <div class="row"><span>Aktuálně</span><b>${current === null ? 'málo dat' : intFmt.format(current)}</b></div>
-      <p class="muted note">Skóre začíná na 50 na začátku tvé historie a počítá se z odhadů 1RM všech cviků na daný sval. Hodnota 60 znamená o 20 % vyšší odhad síly než na začátku. Sval se zobrazí, jen když má v posledních 28 dnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR.</p>
+      <p class="muted note">Skóre vychází ze společného trendu odhadů 1RM všech cviků na daný sval. 50 bodů odpovídá průměru prvních čtyř týdnů (září 2025), hodnota 60 znamená o 20 % vyšší odhad síly. Sval se zobrazí, jen když má v posledních 6 týdnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR. Starší týdny se po nahrání nových dat mohou lehce posunout.</p>
     </section>`;
 
   strengthBox.querySelector('#strengthSelect').addEventListener('change', e => { strengthState.key = e.target.value; renderStrength(); });

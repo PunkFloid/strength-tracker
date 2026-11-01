@@ -4,6 +4,10 @@ const Normalize = (() => {
   const RIR_CAP = 3;          // nejvyšší RIR odhadnuté z pořadí sérií
   // váha saní, kterou starý export nezapisoval (jen kotouče); doplní se ke každé sérii
   const OLD_EXTRA_WEIGHT = { '45° Leg Press': 53.5 };
+  // série před tímto dnem se nepočítají (začátečnické období, kdy se necvičilo do selhání)
+  const START_DAY = '2025-08-01';
+  // nohy (quads, hamstrings) bez vyplněného RIR se berou, jako by měly tento RIR
+  const LEG_ASSUMED_RIR = 2;
 
   const num = v => {
     if (v === undefined || v === null || String(v).trim() === '') return null;
@@ -11,6 +15,10 @@ const Normalize = (() => {
     return isNaN(n) ? null : n;
   };
   const cleanName = s => (s || '').replace(/\s*∈.*$/, '').trim();
+  const isLeg = name => {
+    const w = Muscles.WEIGHTS[name];
+    return !!(w && (w.quads || w.hamstrings));
+  };
 
   function categoryMF(setType) {
     const t = setType.replace(/\s*\([LR]\)$/, '');
@@ -25,18 +33,22 @@ const Normalize = (() => {
 
   function fromMacroFactor(rows) {
     return rows.map(r => {
-      const cat = categoryMF(r['Set Type'] || '');
+      let cat = categoryMF(r['Set Type'] || '');
+      const day = (r['Date'] || '').slice(0, 10);
+      if (day < START_DAY && (cat === 'standard' || cat === 'failure')) cat = 'early';
       const weight = num(r['Weight (kg)']);
       const base = num(r['Exercise Base Weight (kg)']);
       let total = weight;
       if (weight !== null && base && weight < base) total = weight + base; // pravidlo hack squatu
+      const ex = Exercises.lookup(cleanName(r['Exercise']));
       let rir = num(r['RIR']);
       if (rir === null && cat === 'failure') rir = 0;
+      let assumed = false;
+      if (rir === null && cat === 'standard' && isLeg(ex.canonical)) { rir = LEG_ASSUMED_RIR; assumed = true; }
       const working = cat === 'standard' || cat === 'failure';
-      const ex = Exercises.lookup(cleanName(r['Exercise']));
       return {
         source: 'macrofactor',
-        day: (r['Date'] || '').slice(0, 10),
+        day,
         exercise: ex.canonical,
         rawExercise: cleanName(r['Exercise']),
         load: ex.load,
@@ -46,7 +58,8 @@ const Normalize = (() => {
         weight: total,
         reps: num(r['Reps']),
         rir,
-        rirEstimated: false,
+        rirEstimated: assumed,
+        rirAssumedLeg: assumed,
         eligible: working && total !== null && total > 0 && rir !== null && num(r['Reps']) !== null
       };
     });
@@ -65,6 +78,8 @@ const Normalize = (() => {
       const ex = Exercises.lookup(cleanName(r['Exercise']));
       // multiplier platí jen pro pár činek a kotouče na obou stranách, jinde se váha nenásobí
       const factor = (ex.load === 'pair' || ex.load === 'platePerSide') ? mult : 1;
+      let category = warm ? 'warmup' : (isDrop ? 'drop' : 'standard');
+      if (category === 'standard' && day < START_DAY) category = 'early';
       const rec = {
         source: 'old',
         day,
@@ -73,11 +88,12 @@ const Normalize = (() => {
         load: ex.load,
         known: ex.known,
         perHandFactor: ex.load === 'pair' ? 0.5 : 1,
-        category: warm ? 'warmup' : (isDrop ? 'drop' : 'standard'),
+        category,
         weight: weight === null ? null : weight * factor + (OLD_EXTRA_WEIGHT[ex.canonical] || 0),
         reps: num(r['Reps']),
         rir: null,
         rirEstimated: false,
+        rirAssumedLeg: false,
         eligible: false
       };
       sets.push(rec);
@@ -118,6 +134,7 @@ const Normalize = (() => {
         overlapDays,
         eligibleSets: eligible.length,
         eligibleFromOld: eligible.filter(s => s.source === 'old').length,
+        eligibleLegsAssumed: eligible.filter(s => s.rirAssumedLeg).length,
         eligibleExercises: new Set(eligible.map(s => s.exercise)).size,
         exercises: new Set(all.map(s => s.exercise)).size,
         unmapped: [...new Set(all.filter(s => !s.known).map(s => s.rawExercise))],

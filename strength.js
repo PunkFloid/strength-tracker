@@ -1,32 +1,66 @@
-// strength.js - skóre síly (Overall + 7 svalů), řetězený index od hodnoty 50
+// strength.js - skóre síly (Overall + 7 svalů)
+// Metoda: pro každý cvik se týden po týdnu určí nejlepší odhad 1RM v klouzavém okně
+// (okno se podle četnosti cviku zkracuje nebo prodlužuje). Pro každý sval se pak odhadne
+// jeden společný trend (každý cvik má vlastní úroveň, trend je pro všechny cviky stejný).
+// Skóre = 50 × (trend vůči průměru prvních 4 týdnů).
 const Strength = (() => {
-  const WINDOW = 28;     // okno ve dnech: nejlepší výkon cviku za posledních 28 dní
-  const STEP = 7;        // skóre se počítá po týdnech
-  const MIN_SETS = 6;    // sval se zobrazí, až má v okně aspoň tolik sérií
-  const BASE = 50;       // počáteční hodnota
+  const K_SESSIONS = 3;     // okno cviku má obsahovat aspoň tolik tréninků ...
+  const MIN_DAYS = 14;      // ... ale vždy aspoň posledních 14 dní ...
+  const MAX_DAYS = 84;      // ... a nejvýš 84 dní zpět
+  const GATE_DAYS = 42;     // sval se zobrazí, má-li za tuto dobu aspoň MIN_SETS pracovních sérií
+  const MIN_SETS = 6;
+  const READY_DAYS = 27;    // sval se začne počítat až 27 dní po prvním tréninku
+  const SMOOTH = 0.5;       // síla vyhlazení trendu mezi sousedními týdny
+  const ANCHOR_WEEKS = 4;   // 50 bodů = průměr prvních 4 týdnů svalu
+  const BASE = 50;
+  const STEP = 7;
   const DAY = 86400000;
 
   const toNum = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY; };
   const toIso = n => new Date(n * DAY).toISOString().slice(0, 10);
 
+  // řešení soustavy A x = b (Gaussova eliminace s výběrem pivotu)
+  function solve(A, b) {
+    const n = b.length;
+    for (let i = 0; i < n; i++) {
+      let p = i;
+      for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+      [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]];
+      for (let r = i + 1; r < n; r++) {
+        const f = A[r][i] / A[i][i];
+        if (f === 0) continue;
+        for (let c = i; c < n; c++) A[r][c] -= f * A[i][c];
+        b[r] -= f * b[i];
+      }
+    }
+    const x = new Array(n).fill(0);
+    for (let i = n - 1; i >= 0; i--) {
+      let s = b[i];
+      for (let c = i + 1; c < n; c++) s -= A[i][c] * x[c];
+      x[i] = s / A[i][i];
+    }
+    return x;
+  }
+
   function compute(sets, today) {
-    const byEx = new Map();     // použitelné série (s RIR) -> výkon
-    const work = new Map();     // všechny pracovní série -> dny (pro počítání sérií)
+    const work = new Map();      // cvik -> dny pracovních sérií
+    const daily = new Map();     // cvik -> (den -> nejlepší výkon z použitelných sérií)
     let minT = Infinity;
     for (const s of sets) {
       const t = toNum(s.day);
-      const isWork = (s.category === 'standard' || s.category === 'failure') && s.weight > 0 && s.reps !== null;
-      if (isWork) {
+      if ((s.category === 'standard' || s.category === 'failure') && s.weight > 0 && s.reps !== null) {
         if (!work.has(s.exercise)) work.set(s.exercise, []);
         work.get(s.exercise).push(t);
       }
       if (!s.eligible) continue;
-      if (!byEx.has(s.exercise)) byEx.set(s.exercise, []);
-      byEx.get(s.exercise).push({ t, v: E1rm.setValue(s) });
+      if (!daily.has(s.exercise)) daily.set(s.exercise, new Map());
+      const dm = daily.get(s.exercise), v = E1rm.setValue(s);
+      if (!dm.has(t) || v > dm.get(t)) dm.set(t, v);
       if (t < minT) minT = t;
     }
-    if (!byEx.size) return null;
-    for (const arr of byEx.values()) arr.sort((a, b) => a.t - b.t);
+    if (!daily.size) return null;
+    const sess = new Map();      // cvik -> [{t, v}] seřazeno vzestupně
+    for (const [ex, dm] of daily) sess.set(ex, [...dm].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t));
 
     const todayN = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) / DAY;
     const dow = (new Date(minT * DAY).getUTCDay() + 6) % 7;      // 0 = pondělí
@@ -34,65 +68,79 @@ const Strength = (() => {
     for (let t = minT + ((7 - dow) % 7); t <= todayN; t += STEP) dates.push(t);
     if (!dates.length || dates[dates.length - 1] < todayN) dates.push(todayN);
 
-    const exOf = {};   // sval -> [[cvik, váha]]
-    for (const [key] of Muscles.LIST) exOf[key] = [];
-    const firstDay = {};   // první trénink svalu (sval se začne počítat až po prvním celém okně)
-    for (const ex of new Set([...byEx.keys(), ...work.keys()])) {
-      const w = Muscles.WEIGHTS[ex];
-      if (!w) continue;
-      const first = Math.min(...(work.get(ex) || [Infinity]), ...(byEx.has(ex) ? [byEx.get(ex)[0].t] : [Infinity]));
-      for (const key in w) {
-        exOf[key].push([ex, w[key]]);
-        if (w[key] >= 0.5 && (firstDay[key] === undefined || first < firstDay[key])) firstDay[key] = first;
+    // výkon cviku k danému dni (klouzavé okno)
+    const perf = ts => {
+      const E = new Map();
+      for (const [ex, arr] of sess) {
+        let i = arr.length - 1;
+        while (i >= 0 && arr[i].t > ts) i--;
+        let best = null, count = 0;
+        for (let j = i; j >= 0; j--) {
+          const { t, v } = arr[j];
+          if (t <= ts - MAX_DAYS) break;
+          if (t > ts - MIN_DAYS || count < K_SESSIONS) { count++; if (best === null || v > best) best = v; }
+          else break;
+        }
+        if (best !== null) E.set(ex, best);
       }
-    }
+      return E;
+    };
+    const Es = dates.map(perf);
 
     const out = { dates, overall: [], muscles: {} };
-    const lastE = {}, cur = {};
-    for (const [key] of Muscles.LIST) { out.muscles[key] = []; lastE[key] = null; cur[key] = null; }
-    let overall = null;
-    let prevS = {};
+    for (const [key] of Muscles.LIST) {
+      out.muscles[key] = new Array(dates.length).fill(null);
+      const exs = [];
+      for (const ex of sess.keys()) {
+        const w = Muscles.WEIGHTS[ex];
+        if (w && w[key]) exs.push([ex, w[key]]);
+      }
+      const main = exs.filter(([, w]) => w >= 0.5);
+      if (!main.length) continue;
+      const first = Math.min(...main.map(([ex]) => Math.min(...(work.get(ex) || [Infinity]), sess.get(ex)[0].t)));
 
-    for (const ts of dates) {
-      // nejlepší výkon a počet sérií každého cviku v okně (ts - 28, ts]
-      const E = new Map(), cnt = new Map();
-      for (const [ex, arr] of byEx) {
-        let best = null, n = 0;
-        for (const p of arr) if (p.t > ts - WINDOW && p.t <= ts) { n++; if (best === null || p.v > best) best = p.v; }
-        if (best !== null) { E.set(ex, best); cnt.set(ex, n); }
-      }
-      const nowS = {};
-      for (const [key] of Muscles.LIST) {
+      // týdny, ve kterých sval má dost dat
+      const active = [], obs = [];
+      dates.forEach((ts, k) => {
         let nSets = 0;
-        for (const [ex, w] of exOf[key]) {
-          if (w < 0.5) continue;
-          for (const t of (work.get(ex) || [])) if (t > ts - WINDOW && t <= ts) nSets++;
-        }
-        const nowE = new Map();
-        for (const [ex] of exOf[key]) if (E.has(ex)) nowE.set(ex, E.get(ex));
-        const ready = firstDay[key] !== undefined && ts >= firstDay[key] + WINDOW - 1;
-        if (!ready || nSets < MIN_SETS || nowE.size === 0) { out.muscles[key].push(null); continue; }
-        if (cur[key] === null) {
-          cur[key] = BASE;
-        } else {
-          let num = 0, den = 0;
-          for (const [ex, w] of exOf[key]) {
-            if (nowE.has(ex) && lastE[key].has(ex)) { num += w * Math.log(nowE.get(ex) / lastE[key].get(ex)); den += w; }
-          }
-          if (den > 0) cur[key] *= Math.exp(num / den);
-        }
-        lastE[key] = nowE;
-        nowS[key] = cur[key];
-        out.muscles[key].push(cur[key]);
+        for (const [ex] of main) for (const t of (work.get(ex) || [])) if (t > ts - GATE_DAYS && t <= ts) nSets++;
+        const rec = [];
+        for (const [ex, w] of exs) if (Es[k].has(ex)) rec.push([ex, w, Math.log(Es[k].get(ex))]);
+        if (ts >= first + READY_DAYS && nSets >= MIN_SETS && rec.length) { active.push(k); obs.push([active.length - 1, rec]); }
+      });
+      const K = active.length;
+      if (K < 3) continue;
+
+      // společný trend: y(týden, cvik) = s(týden) + a(cvik), vyhlazené mezi sousedními týdny
+      const names = [...new Set(obs.flatMap(([, rec]) => rec.map(r => r[0])))];
+      const eIdx = new Map(names.map((n, i) => [n, i]));
+      const N = Array.from({ length: K + names.length }, () => new Array(K + names.length).fill(0));
+      const b = new Array(K + names.length).fill(0);
+      for (const [i, rec] of obs) for (const [ex, w, y] of rec) {
+        const c = K + eIdx.get(ex);
+        N[i][i] += w; N[c][c] += w; N[i][c] += w; N[c][i] += w; b[i] += w * y; b[c] += w * y;
       }
-      // celkové skóre: průměrná změna svalů, které byly aktivní v předchozím i tomto vzorku
-      let logSum = 0, k = 0;
-      for (const key in nowS) if (prevS[key] !== undefined) { logSum += Math.log(nowS[key] / prevS[key]); k++; }
-      if (overall === null) { if (Object.keys(nowS).length) overall = BASE; }
-      else if (k > 0) overall *= Math.exp(logSum / k);
-      out.overall.push(Object.keys(nowS).length ? overall : null);
-      if (Object.keys(nowS).length) prevS = nowS;
+      for (let i = 0; i < K - 1; i++) {
+        N[i][i] += SMOOTH; N[i + 1][i + 1] += SMOOTH; N[i][i + 1] -= SMOOTH; N[i + 1][i] -= SMOOTH;
+      }
+      const m0 = Math.min(ANCHOR_WEEKS, K);       // průměr prvních týdnů = 0
+      for (let i = 0; i < m0; i++) for (let j = 0; j < m0; j++) N[i][j] += 1e4 / (m0 * m0);
+      const x = solve(N, b);
+      active.forEach((k, i) => { out.muscles[key][k] = BASE * Math.exp(x[i]); });
     }
+
+    // celkové skóre: průměrná změna svalů, které byly aktivní v předchozím i tomto týdnu
+    let overall = null, prev = {};
+    dates.forEach((ts, k) => {
+      const now = {};
+      for (const [key] of Muscles.LIST) if (out.muscles[key][k] !== null) now[key] = out.muscles[key][k];
+      let logSum = 0, c = 0;
+      for (const key in now) if (prev[key] !== undefined) { logSum += Math.log(now[key] / prev[key]); c++; }
+      if (overall === null) { if (Object.keys(now).length) overall = BASE; }
+      else if (c > 0) overall *= Math.exp(logSum / c);
+      out.overall.push(Object.keys(now).length ? overall : null);
+      if (Object.keys(now).length) prev = now;
+    });
     return out;
   }
 
