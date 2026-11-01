@@ -76,7 +76,7 @@ function renderSummary(card, name, s) {
     <div class="stats">
       <div><b>${s.rowCount}</b><span>řádků</span></div>
       <div><b>${s.dayCount}</b><span>dnů</span></div>
-      <div><b>${Object.keys(s.exercises).length}</b><span>cviků</span></div>
+      <div><b>${Object.keys(s.exercises).length}</b><span>cviků po sloučení</span></div>
     </div>
     <p class="muted">Období: ${s.minDay || '?'} až ${s.maxDay || '?'}</p>
     <h3>Typy sérií</h3>

@@ -1,87 +1,119 @@
-// exercises.js - tabulka cviků: sjednocení názvů, typ zátěže a zapojené svaly
-// load: 'pair' = dvě činky (MacroFactor ukládá součet obou), 'single' = jedna zátěž (stroj, kabel, jedna činka, osa),
-//       'assisted' = asistované (záporná váha, potřebuje tělesnou váhu), 'bodyweight' = bez externí zátěže
-// muscles: 1 = hlavní sval, 0.5 = pomocný sval
-const EXERCISES = [
-  {"name": "Dumbbell Bench Press", "aliases": [], "load": "pair", "muscles": {"chest": 1, "triceps": 0.5, "shoulders": 0.5}},
-  {"name": "45° Incline Dumbbell Press", "aliases": ["Dumbbell Incline Bench Press"], "load": "pair", "muscles": {"chest": 1, "shoulders": 0.5, "triceps": 0.5}},
-  {"name": "45° Incline Dumbbell Fly", "aliases": ["Dumbbell Incline Fly"], "load": "pair", "muscles": {"chest": 1}},
-  {"name": "Dumbbell Fly", "aliases": [], "load": "pair", "muscles": {"chest": 1}},
-  {"name": "Pec Deck Fly", "aliases": ["Machine Fly"], "load": "single", "muscles": {"chest": 1}},
-  {"name": "High Incline Smith Machine Press", "aliases": ["Smith Machine Incline Bench Press"], "load": "single", "muscles": {"chest": 1, "shoulders": 0.5, "triceps": 0.5}},
-  {"name": "Smith Machine Bench Press", "aliases": [], "load": "single", "muscles": {"chest": 1, "triceps": 0.5, "shoulders": 0.5}},
-  {"name": "Barbell Bench Press", "aliases": [], "load": "single", "muscles": {"chest": 1, "triceps": 0.5, "shoulders": 0.5}},
-  {"name": "Barbell Incline Bench Press", "aliases": [], "load": "single", "muscles": {"chest": 1, "shoulders": 0.5, "triceps": 0.5}},
-  {"name": "Close Grip Bench Press", "aliases": [], "load": "single", "muscles": {"triceps": 1, "chest": 0.5, "shoulders": 0.5}},
-  {"name": "Pin-Loaded Machine Chest Press", "aliases": ["Machine Bench Press"], "load": "single", "muscles": {"chest": 1, "triceps": 0.5, "shoulders": 0.5}},
-  {"name": "Seated Plate-Loaded Machine Chest Press", "aliases": ["Hammerstrength Chest Press"], "load": "single", "muscles": {"chest": 1, "triceps": 0.5, "shoulders": 0.5}, "note": "ověřit: starý export má u tohoto cviku multiplier 2"},
-  {"name": "Overhand Grip Cable Lat Pulldown", "aliases": ["Lat Pulldown"], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Underhand Grip Cable Lat Pulldown", "aliases": [], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Neutral Grip Cable Row", "aliases": ["Cable Row"], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Standing Single Arm Cable Row", "aliases": ["Seated High Cable Single Rows"], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}, "note": "starý export má multiplier 4, ale váhy sedí 1:1"},
-  {"name": "Neutral Grip Pin-Loaded Machine Row", "aliases": ["Machine Row"], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "T-Bar Row", "aliases": [], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Chest-Supported Dumbbell Row (Elbows-In)", "aliases": ["Incline Dumbbell Row"], "load": "pair", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Single Arm Dumbbell Row (Elbow-In)", "aliases": ["Dumbbell Row"], "load": "single", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Dumbbell Pullover", "aliases": [], "load": "single", "muscles": {"lats": 1, "chest": 0.5}},
-  {"name": "Overhand Grip Machine-Assisted Pull-Up", "aliases": [], "load": "assisted", "muscles": {"lats": 1, "biceps": 0.5}},
-  {"name": "Machine-Assisted Dip", "aliases": [], "load": "assisted", "muscles": {"triceps": 1, "chest": 0.5, "shoulders": 0.5}},
-  {"name": "Seated Dumbbell Overhead Press", "aliases": ["Dumbbell Shoulder Press"], "load": "pair", "muscles": {"shoulders": 1, "triceps": 0.5}},
-  {"name": "Seated Neutral Grip Dumbbell Overhead Press", "aliases": ["Seated Dumbbell Front Press"], "load": "pair", "muscles": {"shoulders": 1, "triceps": 0.5}},
-  {"name": "Machine Shoulder Press", "aliases": [], "load": "single", "muscles": {"shoulders": 1, "triceps": 0.5}},
-  {"name": "Standing Dumbbell Lateral Raise", "aliases": ["Dumbbell Lateral Raise"], "load": "pair", "muscles": {"shoulders": 1}},
-  {"name": "Seated Dumbbell Lateral Raise", "aliases": [], "load": "pair", "muscles": {"shoulders": 1}},
-  {"name": "Single Arm Cable Lateral Raise (With Cable In Front Of Body)", "aliases": ["Cable Lateral Raise"], "load": "single", "muscles": {"shoulders": 1}},
-  {"name": "Single Arm High Cable Lateral Raise", "aliases": [], "load": "single", "muscles": {"shoulders": 1}},
-  {"name": "Seated Machine Lateral Raise", "aliases": ["Machine Lateral Raise"], "load": "single", "muscles": {"shoulders": 1}},
-  {"name": "Cable Face Pull", "aliases": [], "load": "single", "muscles": {"shoulders": 1}},
-  {"name": "Machine Rear Delt Fly", "aliases": [], "load": "single", "muscles": {"shoulders": 1}},
-  {"name": "Seated Neutral Grip Dumbbell Rear Delt Fly", "aliases": [], "load": "pair", "muscles": {"shoulders": 1}},
-  {"name": "Cable Upright Row", "aliases": [], "load": "single", "muscles": {"shoulders": 1}},
-  {"name": "Incline Dumbbell Biceps Curl", "aliases": ["Incline Dumbbell Curl"], "load": "pair", "muscles": {"biceps": 1}},
-  {"name": "Seated Dumbbell Curl", "aliases": [], "load": "pair", "muscles": {"biceps": 1}},
-  {"name": "Dumbbell Bicep Curl", "aliases": [], "load": "pair", "muscles": {"biceps": 1}},
-  {"name": "Close Grip EZ Bar Preacher Curl", "aliases": ["Preacher Curl"], "load": "single", "muscles": {"biceps": 1}},
-  {"name": "EZ-Bar Curl", "aliases": [], "load": "single", "muscles": {"biceps": 1}},
-  {"name": "EZ Bar Preacher Reverse Curl", "aliases": [], "load": "single", "muscles": {"biceps": 1}},
-  {"name": "Pin-Loaded Machine Preacher Curl", "aliases": ["Machine Preacher Curl", "Machine Bicep Curl"], "load": "single", "muscles": {"biceps": 1}},
-  {"name": "Single Arm Bayesian Curl", "aliases": ["Behind the Back Cable Bicep Curl"], "load": "single", "muscles": {"biceps": 1}},
-  {"name": "Dumbbell Concentration Curl", "aliases": ["Concentration Curl"], "load": "single", "muscles": {"biceps": 1}, "note": "starý export má multiplier 2, ale váhy sedí 1:1"},
-  {"name": "Single Arm Dumbbell Preacher Curl", "aliases": ["Single Arm Preacher Curl"], "load": "single", "muscles": {"biceps": 1}, "note": "ověřit: starý export má multiplier 2"},
-  {"name": "Dumbbell Skull Crusher", "aliases": ["Dumbbell Skullcrusher"], "load": "pair", "muscles": {"triceps": 1}},
-  {"name": "Cable Straight Bar Overhead Triceps Extension", "aliases": ["Cable Rope Overhead Triceps Extension"], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Cable Straight Bar Triceps Pushdown", "aliases": ["Cable Tricep Pushdown"], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Cable Rope Triceps Pushdown", "aliases": ["Cable Rope Tricep Extension"], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Seated Dumbbell Overhead Triceps Extension", "aliases": ["Dumbbell Tricep Extension"], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Cable One Arm Underhand Tricep Extension", "aliases": [], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Single Arm Overhead Rope Tricep Extension", "aliases": [], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Seated Tricep Press", "aliases": [], "load": "single", "muscles": {"triceps": 1}},
-  {"name": "Leg Extension", "aliases": [], "load": "single", "muscles": {"quads": 1}},
-  {"name": "45° Leg Press", "aliases": ["Leg Press"], "load": "single", "muscles": {"quads": 1}, "note": "ověřit: váhy ve starém exportu možná neobsahují základ 53,5 kg"},
-  {"name": "Hack Squat", "aliases": [], "load": "single", "muscles": {"quads": 1}},
-  {"name": "Goblet Squat", "aliases": [], "load": "single", "muscles": {"quads": 1}},
-  {"name": "Walking Lunge", "aliases": [], "load": "pair", "muscles": {"quads": 1, "hamstrings": 0.5}},
-  {"name": "Seated Hamstring Curl", "aliases": ["Seated Leg Curl"], "load": "single", "muscles": {"hamstrings": 1}},
-  {"name": "Lying Hamstring Curl", "aliases": [], "load": "single", "muscles": {"hamstrings": 1}},
-  {"name": "Seated Single Leg Hamstring Curl", "aliases": [], "load": "single", "muscles": {"hamstrings": 1}},
-  {"name": "Romanian Deadlift", "aliases": [], "load": "single", "muscles": {"hamstrings": 1}},
-  {"name": "45° Leg Press Calf Raise", "aliases": [], "load": "single", "muscles": {"calves": 1}},
-  {"name": "Seated Machine Hip Adduction", "aliases": ["Machine Hip Adductor"], "load": "single", "muscles": {"adductors": 1}},
-  {"name": "Machine Crunch (With Overhead Handles)", "aliases": ["Ab Crunch Machine"], "load": "single", "muscles": {"abs": 1}},
-  {"name": "Push Up", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Push Up on Knees", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Dip", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Pull Up", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Air Squats", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Incline Back Extension", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Bent-Leg Reverse Crunch", "aliases": ["Reverse Crunch", "Decline Reverse Crunch"], "load": "bodyweight", "muscles": {}},
-  {"name": "Crunches", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Decline Crunch", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Vertical Leg Raise", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Ab Rollout", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Plank", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Dead Bug", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Alternating Heel Touch", "aliases": [], "load": "bodyweight", "muscles": {}},
-  {"name": "Bird Dog", "aliases": [], "load": "bodyweight", "muscles": {}}
-];
-if (typeof module !== 'undefined') module.exports = EXERCISES;
+// exercises.js - tabulka cviků: sjednocení názvů mezi aplikacemi a typ zátěže
+// Typy zátěže:
+//   pair         = pár činek (váha je součet obou, v grafu se zobrazí polovina)
+//   single       = jedna činka
+//   platePerSide = kotouče na obou stranách (starý export násobí 2)
+//   none         = bez vnější zátěže (vlastní váha)
+//   other        = stroj, kabel, osa (váha se bere tak, jak je zapsaná)
+const Exercises = (() => {
+  // [hlavní název, typ zátěže, [názvy ze starého exportu / další varianty]]
+  const TABLE = [
+    // --- dvojice činek ---
+    ['Dumbbell Bench Press', 'pair', []],
+    ['45° Incline Dumbbell Press', 'pair', ['Dumbbell Incline Bench Press']],
+    ['45° Incline Dumbbell Fly', 'pair', ['Dumbbell Incline Fly']],
+    ['Dumbbell Fly', 'pair', []],
+    ['Seated Dumbbell Overhead Press', 'pair', ['Dumbbell Shoulder Press']],
+    ['Seated Neutral Grip Dumbbell Overhead Press', 'pair', ['Seated Dumbbell Front Press']],
+    ['Standing Dumbbell Lateral Raise', 'pair', ['Dumbbell Lateral Raise']],
+    ['Seated Dumbbell Lateral Raise', 'pair', []],
+    ['Seated Neutral Grip Dumbbell Rear Delt Fly', 'pair', []],
+    ['Dumbbell Skull Crusher', 'pair', ['Dumbbell Skullcrusher']],
+    ['Incline Dumbbell Biceps Curl', 'pair', ['Incline Dumbbell Curl']],
+    ['Seated Dumbbell Curl', 'pair', []],
+    ['Dumbbell Bicep Curl', 'pair', []],
+    ['Chest-Supported Dumbbell Row (Elbows-In)', 'pair', ['Incline Dumbbell Row']],
+    ['Walking Lunge', 'pair', []],
+    // --- jedna činka ---
+    ['Dumbbell Pullover', 'single', []],
+    ['Goblet Squat', 'single', []],
+    ['Seated Dumbbell Overhead Triceps Extension', 'single', ['Dumbbell Tricep Extension']],
+    ['Dumbbell Concentration Curl', 'single', ['Concentration Curl']],
+    ['Single Arm Dumbbell Row (Elbow-In)', 'single', ['Dumbbell Row']],
+    ['Single Arm Dumbbell Preacher Curl', 'single', ['Single Arm Preacher Curl']],
+    // --- kotouče na obou stranách ---
+    ['Hammerstrength Chest Press', 'platePerSide', []],
+    // --- stroje, kabely, osy ---
+    ['Overhand Grip Cable Lat Pulldown', 'other', ['Lat Pulldown']],
+    ['Underhand Grip Cable Lat Pulldown', 'other', []],
+    ['Seated Hamstring Curl', 'other', ['Seated Leg Curl']],
+    ['Seated Single Leg Hamstring Curl', 'other', []],
+    ['Lying Hamstring Curl', 'other', []],
+    ['Leg Extension', 'other', []],
+    ['45° Leg Press', 'other', ['Leg Press']],
+    ['45° Leg Press Calf Raise', 'other', []],
+    ['Hack Squat', 'other', []],
+    ['Pec Deck Fly', 'other', ['Machine Fly']],
+    ['Seated Machine Hip Adduction', 'other', ['Machine Hip Adductor']],
+    ['Neutral Grip Pin-Loaded Machine Row', 'other', ['Machine Row']],
+    ['Neutral Grip Cable Row', 'other', ['Cable Row']],
+    ['Standing Single Arm Cable Row', 'other', ['Seated High Cable Single Rows']],
+    ['Single Arm Cable Lateral Raise (With Cable In Front Of Body)', 'other', ['Cable Lateral Raise']],
+    ['Single Arm High Cable Lateral Raise', 'other', []],
+    ['Seated Machine Lateral Raise', 'other', ['Machine Lateral Raise']],
+    ['Cable Straight Bar Triceps Pushdown', 'other', ['Cable Tricep Pushdown']],
+    ['Cable Rope Triceps Pushdown', 'other', ['Cable Rope Tricep Extension']],
+    ['Cable Straight Bar Overhead Triceps Extension', 'other', ['Cable Rope Overhead Triceps Extension']],
+    ['Close Grip EZ Bar Preacher Curl', 'other', ['Preacher Curl']],
+    ['Pin-Loaded Machine Preacher Curl', 'other', ['Machine Preacher Curl', 'Machine Bicep Curl']],
+    ['Machine Crunch (With Overhead Handles)', 'other', ['Ab Crunch Machine']],
+    ['Cable Face Pull', 'other', []],
+    ['Close Grip Bench Press', 'other', []],
+    ['High Incline Smith Machine Press', 'other', []],
+    ['Pin-Loaded Machine Chest Press', 'other', []],
+    ['Seated Plate-Loaded Machine Chest Press', 'other', []],
+    ['Single Arm Bayesian Curl', 'other', []],
+    ['EZ Bar Preacher Reverse Curl', 'other', []],
+    ['Machine Bench Press', 'other', []],
+    ['Machine Shoulder Press', 'other', []],
+    ['Machine Rear Delt Fly', 'other', []],
+    ['Smith Machine Bench Press', 'other', []],
+    ['Smith Machine Incline Bench Press', 'other', []],
+    ['Barbell Bench Press', 'other', []],
+    ['Barbell Incline Bench Press', 'other', []],
+    ['EZ-Bar Curl', 'other', []],
+    ['T-Bar Row', 'other', []],
+    ['Romanian Deadlift', 'other', []],
+    ['Cable Upright Row', 'other', []],
+    ['Behind the Back Cable Bicep Curl', 'other', []],
+    ['Seated Tricep Press', 'other', []],
+    ['Single Arm Overhead Rope Tricep Extension', 'other', []],
+    ['Cable One Arm Underhand Tricep Extension', 'other', []],
+    // --- asistované (záporná váha, potřebují tělesnou váhu) ---
+    ['Overhand Grip Machine-Assisted Pull-Up', 'assisted', []],
+    ['Machine-Assisted Dip', 'assisted', []],
+    // --- bez vnější zátěže ---
+    ['Bent-Leg Reverse Crunch', 'none', ['Reverse Crunch']],
+    ['Decline Reverse Crunch', 'none', []],
+    ['Decline Crunch', 'none', []],
+    ['Crunches', 'none', []],
+    ['Dead Bug', 'none', []],
+    ['Bird Dog', 'none', []],
+    ['Alternating Heel Touch', 'none', []],
+    ['Vertical Leg Raise', 'none', []],
+    ['Ab Rollout', 'none', []],
+    ['Incline Back Extension', 'none', []],
+    ['Push Up', 'none', []],
+    ['Push Up on Knees', 'none', []],
+    ['Air Squats', 'none', []],
+    ['Pull Up', 'none', []],
+    ['Dip', 'none', []]
+  ];
+
+  const map = new Map();
+  for (const [canonical, load, aliases] of TABLE) {
+    const entry = { canonical, load };
+    map.set(canonical.toLowerCase(), entry);
+    for (const a of aliases) map.set(a.toLowerCase(), entry);
+  }
+
+  // vrátí { canonical, load, known }; neznámý cvik zůstane pod svým názvem jako typ "other"
+  function lookup(name) {
+    const e = map.get(String(name).trim().toLowerCase());
+    return e ? { canonical: e.canonical, load: e.load, known: true }
+             : { canonical: String(name).trim(), load: 'other', known: false };
+  }
+
+  return { lookup, TABLE };
+})();
+if (typeof module !== 'undefined') module.exports = Exercises;
