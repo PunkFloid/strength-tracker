@@ -6,7 +6,7 @@ const Body = (() => {
     lean: { label: 'Lean mass', unit: 'kg', delta: 'kg', col: 'Hmotnost bez tuku(kg)' }
   };
   // vyhlazení: poločas exponenciálního průměru ve dnech (0 = bez vyhlazení, v grafu průměr za období)
-  const SMOOTHING = [['raw', 'Bez'], ['light', 'Slabé'], ['medium', 'Střední'], ['strong', 'Silné']];
+  const SMOOTHING = [['raw', 'Bez vyhlazení'], ['medium', 'Střední vyhlazení']];
   const HALF_LIFE = { raw: 0, light: 5, medium: 10, strong: 21 };
   const MAX_STALE_DAYS = 14;   // bod grafu se nevykreslí, pokud poslední vážení je starší než tolik dní
   const DAY = 86400000;

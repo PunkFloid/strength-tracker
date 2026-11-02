@@ -1,4 +1,4 @@
-// app.js - import souborů, ukládání dat, skóre síly, odhad 1RM a tělesné složení
+// app.js - import souborů, ukládání dat, synchronizace přes GitHub, skóre síly, odhad 1RM a tělesné složení
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
@@ -12,6 +12,10 @@ const loaded = { macrofactor: null, old: null };  // z nich spočítané série
 let mergedSets = [];
 let strengthResults = null;
 let storageNote = '';
+let syncConfig = null;     // { repo, token, auto, lastSync } - jen v tomto zařízení
+let syncPromise = null;    // běžící synchronizace
+let syncMsg = { text: '', kind: '' };
+let lastAutoSync = 0;
 const e1rmState = { exercise: null, period: '1Y' };
 const strengthState = { key: 'overall', period: '1Y', mode: 'form' };
 const bodyState = { metric: 'weight', period: '1Y', smooth: 'medium' };
@@ -20,6 +24,7 @@ const MODES = [['form', 'Forma'], ['max', 'Maximum']];
 const numFmt = new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const intFmt = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 });
 const dateFmt = d => `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
+const dateTimeFmt = d => `${dateFmt(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const isoToCz = iso => (iso ? dateFmt(new Date(iso)) : '?');
 const wideQuery = window.matchMedia('(min-width: 900px)');
 
@@ -37,6 +42,7 @@ const mergedBox = document.getElementById('merged');
 const strengthBox = document.getElementById('strength');
 const e1rmBox = document.getElementById('e1rm');
 const bodyBox = document.getElementById('bodycomp');
+const syncBox = document.getElementById('sync');
 
 dropzone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => handleFiles(fileInput.files));
@@ -46,6 +52,8 @@ fileInput.addEventListener('change', () => handleFiles(fileInput.files));
   dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('hover'); }));
 dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 wideQuery.addEventListener('change', () => { renderStrength(); renderE1rm(); renderBody(); });
+// po návratu do apky (např. z pozadí na iPhonu) se data znovu synchronizují
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoSync(); });
 
 // ---------- ukládání ----------
 
@@ -75,6 +83,7 @@ function rebuild() {
 async function restore() {
   try {
     for (const f of FORMATS) saved[f] = (await Store.get('rows:' + f)) || null;
+    syncConfig = (await Store.get('sync:config')) || null;
     await Store.requestPersistent();
   } catch (err) {
     storageNote = 'Ukládání v tomto prohlížeči není dostupné (' + err.message + '). Data se po zavření stránky ztratí.';
@@ -83,10 +92,13 @@ async function restore() {
   renderStorage();
   renderMerged();
   renderBody();
+  renderSync();
+  autoSync(true);
 }
 
 async function clearAll() {
-  if (!confirm('Opravdu smazat všechna data uložená v tomto zařízení?')) return;
+  const extra = syncConfig ? ' Data v GitHubu zůstanou a při příští synchronizaci se sem vrátí.' : '';
+  if (!confirm('Opravdu smazat všechna data uložená v tomto zařízení?' + extra)) return;
   for (const f of FORMATS) { await Store.remove('rows:' + f); saved[f] = null; }
   rebuild();
   mergedSets = [];
@@ -133,15 +145,136 @@ function renderStorage() {
         <button id="backupBtn" ${any ? '' : 'disabled'}>Zálohovat (JSON)</button>
         <button id="clearBtn" class="danger" ${any ? '' : 'disabled'}>Smazat data</button>
       </div>
-      <p class="muted note">Data jsou uložená jen v tomto prohlížeči a tomto zařízení. Mac a iPhone mají každý vlastní kopii a apka na ploše iPhonu má úložiště oddělené od Safari. Zálohu (JSON) nahraješ do stejného pole jako CSV.</p>
+      <p class="muted note">Data jsou uložená v tomto prohlížeči a tomto zařízení. Apka na ploše iPhonu má úložiště oddělené od Safari. Mezi zařízeními je přenese synchronizace přes GitHub (karta výše) nebo záloha (JSON), kterou nahraješ do stejného pole jako CSV.</p>
     </section>`;
   storageBox.querySelector('#backupBtn').addEventListener('click', backup);
   storageBox.querySelector('#clearBtn').addEventListener('click', clearAll);
 }
 
+// ---------- synchronizace přes GitHub ----------
+
+function setSyncMsg(text, kind) {
+  syncMsg = { text, kind: kind || '' };
+  const el = document.getElementById('syncMsg');
+  if (el) { el.textContent = text; el.className = 'note ' + (kind === 'error' ? 'error' : kind === 'ok' ? 'ok' : 'muted'); }
+}
+
+function renderSync() {
+  const msgClass = 'note ' + (syncMsg.kind === 'error' ? 'error' : syncMsg.kind === 'ok' ? 'ok' : 'muted');
+  if (!syncConfig) {
+    syncBox.innerHTML = `
+      <section class="card sync">
+        <h2>Synchronizace přes GitHub</h2>
+        <p class="muted">Data se uloží do tvého soukromého repozitáře a stáhnou se do každého zařízení, kde zadáš stejný repozitář a token.</p>
+        <input id="syncRepo" class="input" placeholder="uživatel/repozitář, např. PunkFloid/strength-tracker-data" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <input id="syncToken" class="input" type="password" placeholder="Token (začíná github_pat_)" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <div class="btns"><button id="syncConnect">Připojit a synchronizovat</button></div>
+        <p id="syncMsg" class="${msgClass}">${escapeHtml(syncMsg.text)}</p>
+      </section>`;
+    syncBox.querySelector('#syncConnect').addEventListener('click', connectSync);
+    return;
+  }
+  const busy = !!syncPromise;
+  syncBox.innerHTML = `
+    <section class="card sync">
+      <h2>Synchronizace přes GitHub</h2>
+      <p class="muted">Repozitář: <b>${escapeHtml(syncConfig.repo)}</b></p>
+      <p class="muted">Poslední synchronizace: ${syncConfig.lastSync ? dateTimeFmt(new Date(syncConfig.lastSync)) : 'zatím žádná'}</p>
+      <label class="check"><input type="checkbox" id="syncAuto" ${syncConfig.auto ? 'checked' : ''}> <span>Synchronizovat automaticky při otevření apky a po importu souboru</span></label>
+      <div class="btns">
+        <button id="syncNow" ${busy ? 'disabled' : ''}>${busy ? 'Synchronizuji…' : 'Synchronizovat'}</button>
+        <button id="syncOff" class="danger" ${busy ? 'disabled' : ''}>Odpojit</button>
+      </div>
+      <p id="syncMsg" class="${msgClass}">${escapeHtml(syncMsg.text)}</p>
+      <p class="muted note">Token je uložený jen v tomto zařízení (není v záloze ani ve veřejném repozitáři). Stejná data se slučují po dnech, takže nic nezdvojíš. Smazání dat v zařízení neodstraní data z GitHubu.</p>
+    </section>`;
+  syncBox.querySelector('#syncNow').addEventListener('click', () => runSync());
+  syncBox.querySelector('#syncOff').addEventListener('click', disconnectSync);
+  syncBox.querySelector('#syncAuto').addEventListener('change', async e => {
+    syncConfig.auto = e.target.checked;
+    await Store.set('sync:config', syncConfig);
+  });
+}
+
+// stáhne z GitHubu nová data, nahraje tam nová data z tohoto zařízení a uloží výsledek
+async function doSync(cfg) {
+  const res = await Sync.sync(cfg, saved, FORMATS, dayOf);
+  for (const [f, obj] of Object.entries(res.updates)) {
+    await Store.set('rows:' + f, obj);
+    saved[f] = obj;
+  }
+  if (Object.keys(res.updates).length) {
+    rebuild();
+    renderStorage();
+    renderMerged();
+    renderBody();
+  }
+  return res.summary;
+}
+
+function runSync() {
+  if (!syncConfig || syncPromise) return syncPromise;
+  setSyncMsg('Synchronizuji…', '');
+  syncPromise = (async () => {
+    try {
+      const summary = await doSync(syncConfig);
+      syncConfig.lastSync = new Date().toISOString();
+      await Store.set('sync:config', syncConfig);
+      setSyncMsg(summary, 'ok');
+    } catch (err) {
+      setSyncMsg(Sync.explain(err), err && err.offline ? '' : 'error');
+    }
+  })().finally(() => { syncPromise = null; renderSync(); });
+  renderSync();
+  return syncPromise;
+}
+
+function autoSync(force) {
+  if (!syncConfig || !syncConfig.auto) return;
+  if (!force && Date.now() - lastAutoSync < 60000) return;
+  lastAutoSync = Date.now();
+  runSync();
+}
+
+async function connectSync() {
+  if (syncPromise) return;
+  const repo = Sync.parseRepo(document.getElementById('syncRepo').value);
+  const token = document.getElementById('syncToken').value.trim();
+  if (!repo) { setSyncMsg('Zadej repozitář ve tvaru uživatel/repozitář.', 'error'); return; }
+  if (!token) { setSyncMsg('Vlož token.', 'error'); return; }
+  const button = document.getElementById('syncConnect');
+  button.disabled = true;
+  setSyncMsg('Ověřuji přístup a synchronizuji…', '');
+  const cfg = { repo, token, auto: true, lastSync: null };
+  syncPromise = (async () => {
+    try {
+      const summary = await doSync(cfg);
+      cfg.lastSync = new Date().toISOString();
+      await Store.set('sync:config', cfg);
+      syncConfig = cfg;
+      setSyncMsg(summary, 'ok');
+    } catch (err) {
+      setSyncMsg(Sync.explain(err), 'error');
+    }
+  })().finally(() => {
+    syncPromise = null;
+    if (syncConfig) renderSync();
+    else { const b = document.getElementById('syncConnect'); if (b) b.disabled = false; }
+  });
+}
+
+async function disconnectSync() {
+  if (!confirm('Odpojit synchronizaci? Token se z tohoto zařízení smaže. Data v zařízení i v GitHubu zůstanou.')) return;
+  await Store.remove('sync:config');
+  syncConfig = null;
+  syncMsg = { text: '', kind: '' };
+  renderSync();
+}
+
 // ---------- import souborů ----------
 
 async function handleFiles(fileList) {
+  if (syncPromise) await syncPromise;   // počkáme, až doběhne synchronizace
   for (const file of fileList) {
     const card = document.createElement('section');
     card.className = 'card';
@@ -171,6 +304,7 @@ async function handleFiles(fileList) {
     }
   }
   fileInput.value = '';
+  autoSync(true);
 }
 
 async function importBackup(text, fileName, card) {
@@ -314,7 +448,7 @@ function renderBody() {
   const metric = bodyState.metric;
   const info = Body.METRICS[metric];
 
-  // osa Y je společná pro všechna vyhlazení, aby se při přepínání nehýbala
+  // osa Y je společná pro obě varianty vyhlazení, aby se při přepínání nehýbala
   const variants = {};
   for (const [k] of Body.SMOOTHING) variants[k] = Body.series(s.rows, metric, k, bodyState.period, today);
   const withData = Object.values(variants).filter(d => d.points.length > 0);
@@ -340,19 +474,18 @@ function renderBody() {
       <div class="seg" data-kind="period">
         ${PERIODS.map(([k, label]) => `<button data-period="${k}" class="${k === bodyState.period ? 'on' : ''}">${label}</button>`).join('')}
       </div>
-      <p class="muted tiny">Vyhlazení</p>
       <div class="seg" data-kind="smooth">
         ${Body.SMOOTHING.map(([k, label]) => `<button data-smooth="${k}" class="${k === bodyState.smooth ? 'on' : ''}">${label}</button>`).join('')}
       </div>
-      <p class="eyebrow">${info.label.toUpperCase()} · ${smoothLabel.toUpperCase()} VYHLAZENÍ</p>
+      <p class="eyebrow">${info.label.toUpperCase()} · ${smoothLabel.toUpperCase()}</p>
       <div class="big">${range} <small>${info.unit}</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
       ${hasData ? LineChart.render(data, bodyState.period, wideQuery.matches, yRange, tipFmt) : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Změna za období</span><b>${data.change === null ? '–' : signed(data.change, info.delta)}</b></div>
       <div class="row"><span>Průměrně za měsíc</span><b>${data.perMonth === null ? '–' : signed(data.perMonth, info.delta)}</b></div>
-      <div class="row"><span>Aktuálně (vyhlazeně)</span><b>${data.current === null ? '–' : val(data.current)}</b></div>
+      <div class="row"><span>Aktuálně${bodyState.smooth === 'raw' ? ' (průměr posledního období)' : ' (vyhlazeně)'}</span><b>${data.current === null ? '–' : val(data.current)}</b></div>
       <div class="row"><span>Poslední vážení</span><b>${data.latestRaw ? `${val(data.latestRaw.value)} · ${dateFmt(data.latestRaw.day)}` : '–'}</b></div>
-      <p class="muted note">Denní vážení silně kolísá (váha asi ±0,4 kg, tuk a lean mass ±0,7), proto se body grafu vyhlazují exponenciálním průměrem: Slabé = poločas 5 dní, Střední = 10, Silné = 21, Bez vyhlazení = průměr za týden nebo měsíc. Klepnutím na bod uvidíš hodnotu a změnu oproti předchozímu týdnu (3 měsíce) nebo měsíci. Změna tuku je v procentních bodech (b.). Lean mass je hmotnost bez tuku z bioimpedance a ovlivňuje ji hydratace.</p>
+      <p class="muted note">Denní vážení silně kolísá (váha asi ±0,4 kg, tuk a lean mass ±0,7), proto je ve výchozím stavu zapnuté střední vyhlazení: exponenciální průměr s poločasem 10 dní. Bez vyhlazení je bod grafu průměr všech vážení za týden (3 měsíce) nebo za měsíc. Klepnutím na bod uvidíš hodnotu a změnu oproti předchozímu týdnu nebo měsíci. Změna tuku je v procentních bodech (b.). Lean mass je hmotnost bez tuku z bioimpedance a ovlivňuje ji hydratace.</p>
     </section>`;
 
   bodyBox.querySelectorAll('.seg[data-kind="metric"] button').forEach(b =>
