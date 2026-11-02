@@ -25,7 +25,7 @@ const LineChart = (() => {
 
   // wide = true: širší a nižší graf pro velké displeje (Mac, PC)
   // yRange = { min, max }: volitelný pevný rozsah osy Y (pro porovnání více grafů)
-  // fmt = funkce, která z hodnoty udělá text do popisku (např. "31,2 kg")
+  // fmt = funkce, která z hodnoty udělá text do popisku: fmt(hodnota, měsíc/týden, předchozí měsíc/týden)
   // Čtvrtý parametr může být buď yRange, nebo rovnou fmt; pátý je fmt.
   function render(data, period, wide, a, b) {
     const yRange = typeof a === 'function' ? null : a;
@@ -67,14 +67,16 @@ const LineChart = (() => {
     const pts = data.buckets.map((b, i) => (b.value === null ? null : { x: xC(i), y: y(b.value), est: b.estimated, b })).filter(Boolean);
     if (pts.length > 1) svg += `<polyline points="${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" class="line"/>`;
     // body + neviditelné větší kolečko pro snadné najetí / klepnutí
+    let prevB = null;
     for (const p of pts) {
       const s = p.b.start;
       const label = period === '3M'
         ? `týden od ${s.getDate()}. ${s.getMonth() + 1}. ${s.getFullYear()}`
         : `${MONTHS[s.getMonth()]} ${s.getFullYear()}`;
-      const tip = `${label} · ${format(p.b.value)}${p.est ? ' · odhad RIR' : ''}`;
+      const tip = `${label} · ${format(p.b.value, p.b, prevB)}${p.est ? ' · odhad RIR' : ''}`;
       svg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5" class="${p.est ? 'dot est' : 'dot'}"/>`;
       svg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="14" class="hit" data-tip="${attr(tip)}"/>`;
+      prevB = p.b;
     }
     return svg + '</svg>';
   }

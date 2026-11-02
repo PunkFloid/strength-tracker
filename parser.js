@@ -31,6 +31,7 @@ const Parser = (() => {
   function detectFormat(headers) {
     if (headers.includes('Set Type') && headers.includes('Workout Duration')) return 'macrofactor';
     if (headers.includes('multiplier') && headers.includes('isWarmup')) return 'old';
+    if (headers.includes('Čas vážení') && headers.includes('Hmotnost(kg)')) return 'body';
     return 'unknown';
   }
 
@@ -43,6 +44,16 @@ const Parser = (() => {
     return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Prague' }).format(d);
   }
 
+  // "2. listopadu 2026 v 8:09:16" -> "2026-11-02" (export z váhy Megafit)
+  const CZ_MONTHS = { ledna: 1, února: 2, března: 3, dubna: 4, května: 5, června: 6, července: 7, srpna: 8, září: 9, října: 10, listopadu: 11, prosince: 12 };
+  function czechDay(value) {
+    const m = String(value).trim().match(/^(\d{1,2})\.\s*([^\s\d]+)\s+(\d{4})/);
+    if (!m) return '';
+    const month = CZ_MONTHS[m[2].toLowerCase()];
+    if (!month) return '';
+    return `${m[3]}-${String(month).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+  }
+
   function summarize(rows) {
     const headers = rows.length ? Object.keys(rows[0]) : [];
     const format = detectFormat(headers);
@@ -52,10 +63,12 @@ const Parser = (() => {
       let day = '';
       if (format === 'macrofactor') day = (r['Date'] || '').slice(0, 10);
       else if (format === 'old') day = pragueDay(r['Date']);
+      else if (format === 'body') day = czechDay(r['Čas vážení']);
       if (!day) continue;
       days.add(day);
       if (!minDay || day < minDay) minDay = day;
       if (!maxDay || day > maxDay) maxDay = day;
+      if (format === 'body' || format === 'unknown') continue;
       const ex = (r['Exercise'] || '').replace(/\s*∈.*$/, '');
       exercises[ex] = (exercises[ex] || 0) + 1;
       const st = format === 'macrofactor' ? r['Set Type'] : (r['isWarmup'].toLowerCase() === 'true' ? 'Warm-up' : 'Pracovní série');
@@ -64,6 +77,6 @@ const Parser = (() => {
     return { format, rowCount: rows.length, dayCount: days.size, minDay, maxDay, exercises, setTypes };
   }
 
-  return { parseCSV, detectFormat, summarize, pragueDay };
+  return { parseCSV, detectFormat, summarize, pragueDay, czechDay };
 })();
 if (typeof module !== 'undefined') module.exports = Parser;

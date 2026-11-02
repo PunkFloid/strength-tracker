@@ -72,3 +72,5 @@ li { margin: 2px 0; }
 .tip + .chart { margin-top: 4px; }
 .chart .hit { fill: rgba(0, 0, 0, 0.001); cursor: pointer; }
 .chart .dot.sel { stroke: #ffffff; stroke-width: 2; }
+.format.body { background: #4a2330; color: #ff9bb0; }
+.tiny { font-size: 0.75rem; margin: 0 0 4px; }

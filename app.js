@@ -1,18 +1,20 @@
-// app.js - import souborů, ukládání dat, skóre síly a odhad 1RM
+// app.js - import souborů, ukládání dat, skóre síly, odhad 1RM a tělesné složení
 const FORMAT_NAMES = {
   macrofactor: 'MacroFactor (Workout Log)',
   old: 'Starý export (WorkoutExport)',
+  body: 'Váha a složení těla (Megafit)',
   unknown: 'Neznámý formát'
 };
-const FORMATS = ['macrofactor', 'old'];
+const FORMATS = ['macrofactor', 'old', 'body'];
 
-const saved = { macrofactor: null, old: null };   // uložené řádky z exportů
+const saved = { macrofactor: null, old: null, body: null };   // uložené řádky z exportů
 const loaded = { macrofactor: null, old: null };  // z nich spočítané série
 let mergedSets = [];
 let strengthResults = null;
 let storageNote = '';
 const e1rmState = { exercise: null, period: '1Y' };
 const strengthState = { key: 'overall', period: '1Y', mode: 'form' };
+const bodyState = { metric: 'weight', period: '1Y', smooth: 'medium' };
 const PERIODS = [['3M', '3 měsíce'], ['1Y', 'Rok'], ['All', 'Vše']];
 const MODES = [['form', 'Forma'], ['max', 'Maximum']];
 const numFmt = new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -23,7 +25,8 @@ const wideQuery = window.matchMedia('(min-width: 900px)');
 
 const dayOf = {
   macrofactor: r => (r['Date'] || '').slice(0, 10),
-  old: r => Parser.pragueDay(r['Date'])
+  old: r => Parser.pragueDay(r['Date']),
+  body: r => Parser.czechDay(r['Čas vážení'])
 };
 
 const dropzone = document.getElementById('dropzone');
@@ -33,6 +36,7 @@ const storageBox = document.getElementById('storage');
 const mergedBox = document.getElementById('merged');
 const strengthBox = document.getElementById('strength');
 const e1rmBox = document.getElementById('e1rm');
+const bodyBox = document.getElementById('bodycomp');
 
 dropzone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => handleFiles(fileInput.files));
@@ -41,7 +45,7 @@ fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 ['dragleave', 'drop'].forEach(ev =>
   dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('hover'); }));
 dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
-wideQuery.addEventListener('change', () => { renderStrength(); renderE1rm(); });
+wideQuery.addEventListener('change', () => { renderStrength(); renderE1rm(); renderBody(); });
 
 // ---------- ukládání ----------
 
@@ -78,6 +82,7 @@ async function restore() {
   rebuild();
   renderStorage();
   renderMerged();
+  renderBody();
 }
 
 async function clearAll() {
@@ -89,6 +94,7 @@ async function clearAll() {
   mergedBox.innerHTML = '';
   strengthBox.innerHTML = '';
   e1rmBox.innerHTML = '';
+  bodyBox.innerHTML = '';
   renderStorage();
 }
 
@@ -159,6 +165,7 @@ async function handleFiles(fileList) {
       }
       renderStorage();
       renderMerged();
+      renderBody();
     } catch (err) {
       card.innerHTML = `<h2>${escapeHtml(file.name)}</h2><p class="error">Soubor se nepodařilo přečíst: ${escapeHtml(err.message)}</p>`;
     }
@@ -300,7 +307,74 @@ function renderE1rm() {
     b.addEventListener('click', () => { e1rmState.period = b.dataset.period; renderE1rm(); }));
 }
 
+function renderBody() {
+  const s = saved.body;
+  if (!s || !s.rows.length) { bodyBox.innerHTML = ''; return; }
+  const today = new Date();
+  const metric = bodyState.metric;
+  const info = Body.METRICS[metric];
+
+  // osa Y je společná pro všechna vyhlazení, aby se při přepínání nehýbala
+  const variants = {};
+  for (const [k] of Body.SMOOTHING) variants[k] = Body.series(s.rows, metric, k, bodyState.period, today);
+  const withData = Object.values(variants).filter(d => d.points.length > 0);
+  const yRange = withData.length ? { min: Math.min(...withData.map(d => d.min)), max: Math.max(...withData.map(d => d.max)) } : null;
+
+  const data = variants[bodyState.smooth];
+  const hasData = data.points.length > 0;
+  const val = v => numFmt.format(v) + ' ' + info.unit;
+  const signed = (d, unit) => `${d > 0.049 ? '+' : d < -0.049 ? '−' : '±'}${numFmt.format(Math.abs(d))} ${unit}`;
+  const unitPer = bodyState.period === '3M' ? 'za týden' : 'za měsíc';
+  // popisek bodu: hodnota + změna oproti předchozímu týdnu / měsíci
+  const tipFmt = (v, b, prev) => val(v) + (prev ? ` · ${signed(v - prev.value, info.delta)} ${unitPer}` : '');
+  const range = !hasData ? '–'
+    : (numFmt.format(data.min) === numFmt.format(data.max) ? numFmt.format(data.min) : `${numFmt.format(data.min)}–${numFmt.format(data.max)}`);
+  const smoothLabel = Body.SMOOTHING.find(x => x[0] === bodyState.smooth)[1];
+
+  bodyBox.innerHTML = `
+    <section class="card body">
+      <h2>Váha a složení těla</h2>
+      <div class="seg" data-kind="metric">
+        ${Object.entries(Body.METRICS).map(([k, m]) => `<button data-metric="${k}" class="${k === metric ? 'on' : ''}">${m.label}</button>`).join('')}
+      </div>
+      <div class="seg" data-kind="period">
+        ${PERIODS.map(([k, label]) => `<button data-period="${k}" class="${k === bodyState.period ? 'on' : ''}">${label}</button>`).join('')}
+      </div>
+      <p class="muted tiny">Vyhlazení</p>
+      <div class="seg" data-kind="smooth">
+        ${Body.SMOOTHING.map(([k, label]) => `<button data-smooth="${k}" class="${k === bodyState.smooth ? 'on' : ''}">${label}</button>`).join('')}
+      </div>
+      <p class="eyebrow">${info.label.toUpperCase()} · ${smoothLabel.toUpperCase()} VYHLAZENÍ</p>
+      <div class="big">${range} <small>${info.unit}</small></div>
+      <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
+      ${hasData ? LineChart.render(data, bodyState.period, wideQuery.matches, yRange, tipFmt) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      <div class="row"><span>Změna za období</span><b>${data.change === null ? '–' : signed(data.change, info.delta)}</b></div>
+      <div class="row"><span>Průměrně za měsíc</span><b>${data.perMonth === null ? '–' : signed(data.perMonth, info.delta)}</b></div>
+      <div class="row"><span>Aktuálně (vyhlazeně)</span><b>${data.current === null ? '–' : val(data.current)}</b></div>
+      <div class="row"><span>Poslední vážení</span><b>${data.latestRaw ? `${val(data.latestRaw.value)} · ${dateFmt(data.latestRaw.day)}` : '–'}</b></div>
+      <p class="muted note">Denní vážení silně kolísá (váha asi ±0,4 kg, tuk a lean mass ±0,7), proto se body grafu vyhlazují exponenciálním průměrem: Slabé = poločas 5 dní, Střední = 10, Silné = 21, Bez vyhlazení = průměr za týden nebo měsíc. Klepnutím na bod uvidíš hodnotu a změnu oproti předchozímu týdnu (3 měsíce) nebo měsíci. Změna tuku je v procentních bodech (b.). Lean mass je hmotnost bez tuku z bioimpedance a ovlivňuje ji hydratace.</p>
+    </section>`;
+
+  bodyBox.querySelectorAll('.seg[data-kind="metric"] button').forEach(b =>
+    b.addEventListener('click', () => { bodyState.metric = b.dataset.metric; renderBody(); }));
+  bodyBox.querySelectorAll('.seg[data-kind="period"] button').forEach(b =>
+    b.addEventListener('click', () => { bodyState.period = b.dataset.period; renderBody(); }));
+  bodyBox.querySelectorAll('.seg[data-kind="smooth"] button').forEach(b =>
+    b.addEventListener('click', () => { bodyState.smooth = b.dataset.smooth; renderBody(); }));
+}
+
 function renderSummary(card, name, s) {
+  if (s.format === 'body') {
+    card.innerHTML = `
+      <h2>${escapeHtml(name)}</h2>
+      <p class="format ${s.format}">${FORMAT_NAMES[s.format]}</p>
+      <div class="stats">
+        <div><b>${s.rowCount}</b><span>vážení</span></div>
+        <div><b>${s.dayCount}</b><span>dnů</span></div>
+      </div>
+      <p class="muted">Období: ${s.minDay || '?'} až ${s.maxDay || '?'}</p>`;
+    return;
+  }
   const top = Object.entries(s.exercises).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const types = Object.entries(s.setTypes).sort((a, b) => b[1] - a[1]);
   card.innerHTML = `
