@@ -1,8 +1,6 @@
 // bplus-tuning.js - kalibrace 1RM Dumbbell Bench Press + časová agregace Formy
 // Vkládá se po e1rm.js a strength.js, ale před app.js.
 const BPlusTuning = (() => {
-  // Pilotní kalibrace z 11 screenshotových porovnání s MacroFactorem.
-  // Koeficient se týká jen Dumbbell Bench Press; jiné cviky používají současný Epley.
   const BENCH = { k: 2, maxEffectiveReps: 30 };
 
   const originalSetValue = E1rm.setValue;
@@ -12,7 +10,20 @@ const BPlusTuning = (() => {
     return s.weight * (1 + BENCH.k * effectiveReps / 30) * s.perHandFactor;
   };
 
-  // Forma se zobrazuje jako stav na konci týdne/měsíce; Maximum dál ukazuje nejvyšší bod.
+  // E1rm.sessions uvnitř volá lokální setValue, proto je potřeba ho přepsat zvlášť.
+  const originalSessions = E1rm.sessions;
+  E1rm.sessions = function (sets, exercise) {
+    if (exercise !== 'Dumbbell Bench Press') return originalSessions(sets, exercise);
+    const byDay = new Map();
+    for (const s of sets) {
+      if (!s.eligible || s.exercise !== exercise) continue;
+      const v = E1rm.setValue(s);
+      const cur = byDay.get(s.day);
+      if (!cur || v > cur.value) byDay.set(s.day, { day: s.day, value: v, estimated: s.rirEstimated });
+    }
+    return [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
+  };
+
   const originalSessionsFor = Strength.sessionsFor;
   Strength.sessionsFor = function (result, key) {
     const sessions = originalSessionsFor(result, key);
