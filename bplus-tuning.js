@@ -1,19 +1,24 @@
-// bplus-tuning.js - kalibrace 1RM Dumbbell Bench Press + časová agregace Formy
-// Vkládá se po e1rm.js a strength.js, ale před app.js.
+// bplus-tuning.js - kalibrace 1RM pro cviky horního těla + časová agregace Formy (B+)
+// Vkládá se po e1rm.js, muscles.js a strength.js, ale před app.js.
 const BPlusTuning = (() => {
-  const BENCH = { k: 2, maxEffectiveReps: 30 };
+  // Kalibrace vznikla z porovnání Dumbbell Bench Press s MacroFactorem a platí pro všechny cviky horního těla.
+  // Cviky nohou (quads, hamstrings) a cviky mimo tabulku svalů používají původní Epley.
+  const UPPER = { k: 2, maxEffectiveReps: 30 };
+
+  const isUpperBody = name => {
+    const w = Muscles.WEIGHTS[name];
+    return !!w && !w.quads && !w.hamstrings;
+  };
 
   const originalSetValue = E1rm.setValue;
   E1rm.setValue = function (s) {
-    if (s.exercise !== 'Dumbbell Bench Press') return originalSetValue(s);
-    const effectiveReps = Math.min(s.reps + s.rir, BENCH.maxEffectiveReps);
-    return s.weight * (1 + BENCH.k * effectiveReps / 30) * s.perHandFactor;
+    if (!isUpperBody(s.exercise)) return originalSetValue(s);
+    const effectiveReps = Math.min(s.reps + s.rir, UPPER.maxEffectiveReps);
+    return s.weight * (1 + UPPER.k * effectiveReps / 30) * s.perHandFactor;
   };
 
   // E1rm.sessions uvnitř volá lokální setValue, proto je potřeba ho přepsat zvlášť.
-  const originalSessions = E1rm.sessions;
   E1rm.sessions = function (sets, exercise) {
-    if (exercise !== 'Dumbbell Bench Press') return originalSessions(sets, exercise);
     const byDay = new Map();
     for (const s of sets) {
       if (!s.eligible || s.exercise !== exercise) continue;
@@ -24,6 +29,7 @@ const BPlusTuning = (() => {
     return [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
   };
 
+  // Forma se zobrazuje jako stav na konci týdne/měsíce; Maximum dál ukazuje nejvyšší bod.
   const originalSessionsFor = Strength.sessionsFor;
   Strength.sessionsFor = function (result, key) {
     const sessions = originalSessionsFor(result, key);
@@ -58,5 +64,5 @@ const BPlusTuning = (() => {
     return data;
   };
 
-  return { benchCalibration: BENCH };
+  return { upperBodyCalibration: UPPER, isUpperBody };
 })();

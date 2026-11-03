@@ -36,6 +36,7 @@ const dayOf = {
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
+const importBox = document.getElementById('importMsg');
 const results = document.getElementById('results');
 const storageBox = document.getElementById('storage');
 const mergedBox = document.getElementById('merged');
@@ -126,29 +127,35 @@ async function backup() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function describeSaved(format) {
-  const s = saved[format];
-  if (!s || !s.rows.length) return `<li>${FORMAT_NAMES[format]}: zatím nic</li>`;
-  const days = s.rows.map(dayOf[format]).filter(Boolean).sort();
-  const nDays = new Set(days).size;
-  return `<li>${FORMAT_NAMES[format]}: ${s.rows.length} řádků, ${nDays} dnů (${days[0]} až ${days[days.length - 1]}), naposledy ${isoToCz(s.updatedAt)}</li>`;
+// první a poslední den záznamu napříč zadanými formáty (dny jsou ve tvaru RRRR-MM-DD)
+function dayRange(formats) {
+  const days = [];
+  for (const f of formats) {
+    if (!saved[f]) continue;
+    for (const r of saved[f].rows) {
+      const d = dayOf[f](r);
+      if (d) days.push(d);
+    }
+  }
+  if (!days.length) return null;
+  days.sort();
+  return { first: days[0], last: days[days.length - 1] };
+}
+
+function isoDayToCz(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  return m ? `${Number(m[3])}. ${Number(m[2])}. ${m[1]}` : String(iso || '?');
 }
 
 function renderStorage() {
-  const any = FORMATS.some(f => saved[f] && saved[f].rows.length);
+  const describe = r => (r ? `${isoDayToCz(r.first)} – ${isoDayToCz(r.last)}` : 'zatím žádná data');
   storageBox.innerHTML = `
     <section class="card data">
-      <h2>Data v tomto zařízení</h2>
-      <ul>${FORMATS.map(describeSaved).join('')}</ul>
+      <h2>Rozsah dat</h2>
+      <div class="row"><span>Cvičení</span><b>${describe(dayRange(['macrofactor', 'old']))}</b></div>
+      <div class="row"><span>Vážení</span><b>${describe(dayRange(['body']))}</b></div>
       ${storageNote ? `<p class="error">${escapeHtml(storageNote)}</p>` : ''}
-      <div class="btns">
-        <button id="backupBtn" ${any ? '' : 'disabled'}>Zálohovat (JSON)</button>
-        <button id="clearBtn" class="danger" ${any ? '' : 'disabled'}>Smazat data</button>
-      </div>
-      <p class="muted note">Data jsou uložená v tomto prohlížeči a tomto zařízení. Apka na ploše iPhonu má úložiště oddělené od Safari. Mezi zařízeními je přenese synchronizace přes GitHub (karta výše) nebo záloha (JSON), kterou nahraješ do stejného pole jako CSV.</p>
     </section>`;
-  storageBox.querySelector('#backupBtn').addEventListener('click', backup);
-  storageBox.querySelector('#clearBtn').addEventListener('click', clearAll);
 }
 
 // ---------- synchronizace přes GitHub ----------
@@ -273,27 +280,45 @@ async function disconnectSync() {
 
 // ---------- import souborů ----------
 
+// hláška nad polem pro import: jedna řádka za každý soubor (úspěch zeleně, chyba červeně)
+function setImportMsg(items) {
+  if (!items.length) { importBox.innerHTML = ''; return; }
+  importBox.innerHTML = `<section class="card import-msg">${items.map(i =>
+    `<p class="${i.kind === 'error' ? 'error' : 'ok'}">${escapeHtml(i.text)}</p>`).join('')}</section>`;
+  importBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 async function handleFiles(fileList) {
+  const files = [...fileList];
+  setImportMsg([]);
   if (syncPromise) await syncPromise;   // počkáme, až doběhne synchronizace
-  for (const file of fileList) {
+  const notes = [];
+  for (const file of files) {
     const card = document.createElement('section');
     card.className = 'card';
     results.prepend(card);
     try {
       if (/\.xlsx$/i.test(file.name)) {
         card.innerHTML = `<h2>${escapeHtml(file.name)}</h2><p class="muted">Soubory .xlsx přidáme v jednom z dalších kroků. Teď použij prosím .csv.</p>`;
+        notes.push({ kind: 'error', text: `${file.name}: soubory .xlsx zatím nejsou podporované, použij .csv nebo .json.` });
         continue;
       }
       const text = await file.text();
       if (/\.json$/i.test(file.name)) {
-        await importBackup(text, file.name, card);
+        const n = await importBackup(text, file.name, card);
+        if (n > 0) notes.push({ kind: 'ok', text: `${file.name}: záloha obnovena (${n} řádků).` });
+        else notes.push({ kind: 'error', text: `${file.name}: záloha je prázdná, nic se neuložilo.` });
       } else {
         const rows = Parser.parseCSV(text);
+        if (!rows.length) throw new Error('soubor neobsahuje žádné řádky');
         const summary = Parser.summarize(rows);
         renderSummary(card, file.name, summary);
         if (summary.format !== 'unknown') {
           await addRows(summary.format, rows, file.name);
           card.insertAdjacentHTML('beforeend', '<p class="ok">Uloženo v tomto zařízení.</p>');
+          notes.push({ kind: 'ok', text: `${file.name}: ${FORMAT_NAMES[summary.format]}, uloženo ${rows.length} řádků.` });
+        } else {
+          notes.push({ kind: 'error', text: `${file.name}: neznámý formát souboru, nic se neuložilo.` });
         }
       }
       renderStorage();
@@ -301,9 +326,11 @@ async function handleFiles(fileList) {
       renderBody();
     } catch (err) {
       card.innerHTML = `<h2>${escapeHtml(file.name)}</h2><p class="error">Soubor se nepodařilo přečíst: ${escapeHtml(err.message)}</p>`;
+      notes.push({ kind: 'error', text: `${file.name}: import se nezdařil (${err.message}).` });
     }
   }
   fileInput.value = '';
+  setImportMsg(notes);
   autoSync(true);
 }
 
@@ -311,13 +338,16 @@ async function importBackup(text, fileName, card) {
   const data = JSON.parse(text);
   if (data.app !== 'strength-tracker') throw new Error('To není záloha z této aplikace.');
   let info = '';
+  let total = 0;
   for (const f of FORMATS) {
     if (data[f] && Array.isArray(data[f].rows) && data[f].rows.length) {
       await addRows(f, data[f].rows, fileName);
+      total += data[f].rows.length;
       info += `<li>${FORMAT_NAMES[f]}: ${data[f].rows.length} řádků</li>`;
     }
   }
-  card.innerHTML = `<h2>${escapeHtml(fileName)}</h2><p class="format old">Záloha</p><ul>${info || '<li>Záloha je prázdná.</li>'}</ul><p class="ok">Obnoveno do tohoto zařízení.</p>`;
+  card.innerHTML = `<h2>${escapeHtml(fileName)}</h2><p class="format old">Záloha</p><ul>${info || '<li>Záloha je prázdná.</li>'}</ul>${total ? '<p class="ok">Obnoveno do tohoto zařízení.</p>' : ''}`;
+  return total;
 }
 
 // ---------- zobrazení ----------
@@ -331,24 +361,10 @@ function renderMerged() {
   const merged = Normalize.merge(loaded.macrofactor || [], loaded.old || []);
   const stats = merged.stats;
   mergedSets = merged.sets;
-  const mfOnly = !loaded.old, oldOnly = !loaded.macrofactor;
-  const unmapped = stats.unmapped.length
-    ? `<p class="error">Cviky bez záznamu v tabulce (${stats.unmapped.length}): ${stats.unmapped.map(escapeHtml).join(', ')}</p>`
-    : `<p class="muted">Všechny názvy cviků jsou v tabulce cviků.</p>`;
-  mergedBox.innerHTML = `
-    <section class="card merged">
-      <h2>Sloučená historie</h2>
-      <p class="muted">${oldOnly ? 'Zatím jen starý export.' : mfOnly ? 'Zatím jen MacroFactor.' : 'MacroFactor má přednost, starý export doplňuje dny, které v něm chybí.'}</p>
-      <div class="stats">
-        <div><b>${stats.days}</b><span>tréninkových dnů</span></div>
-        <div><b>${stats.totalSets}</b><span>sérií</span></div>
-        <div><b>${stats.exercises}</b><span>cviků po sjednocení</span></div>
-      </div>
-      <p class="muted">Období: ${stats.minDay} až ${stats.maxDay}</p>
-      <p class="muted">Dny z MacroFactoru: ${stats.daysMF} · dny jen ze starého exportu: ${stats.daysOldKept} · překrývající se dny (použit MacroFactor): ${stats.overlapDays}</p>
-      <p class="muted">Série použitelné pro odhad 1RM: <b>${stats.eligibleSets}</b> (z toho odhad RIR ze starého exportu: ${stats.eligibleFromOld}, doplněné RIR u nohou: ${stats.eligibleLegsAssumed}) u <b>${stats.eligibleExercises}</b> cviků.</p>
-      ${unmapped}
-    </section>`;
+  // tabulka sloučené historie už se nezobrazuje; zůstává jen varování, když nějaký cvik chybí v tabulce cviků
+  mergedBox.innerHTML = stats.unmapped.length
+    ? `<section class="card merged"><p class="error">Cviky bez záznamu v tabulce (${stats.unmapped.length}): ${stats.unmapped.map(escapeHtml).join(', ')}</p></section>`
+    : '';
   const today = new Date();
   strengthResults = { form: Strength.compute(mergedSets, today, 'form'), max: Strength.compute(mergedSets, today, 'max') };
   renderStrength();
