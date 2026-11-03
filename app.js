@@ -501,7 +501,7 @@ function renderBody() {
       <div class="row"><span>Průměrně za měsíc</span><b>${data.perMonth === null ? '–' : signed(data.perMonth, info.delta)}</b></div>
       <div class="row"><span>Aktuálně${bodyState.smooth === 'raw' ? ' (průměr posledního období)' : ' (vyhlazeně)'}</span><b>${data.current === null ? '–' : val(data.current)}</b></div>
       <div class="row"><span>Poslední vážení</span><b>${data.latestRaw ? `${val(data.latestRaw.value)} · ${dateFmt(data.latestRaw.day)}` : '–'}</b></div>
-      <p class="muted note">Denní vážení silně kolísá (váha asi ±0,4 kg, tuk a lean mass ±0,7), proto je ve výchozím stavu zapnuté střední vyhlazení: exponenciální průměr s poločasem 10 dní. Bez vyhlazení je bod grafu průměr všech vážení za týden (3 měsíce) nebo za měsíc. Klepnutím na bod uvidíš hodnotu a změnu oproti předchozímu týdnu nebo měsíci. Změna tuku je v procentních bodech (b.). Lean mass je hmotnost bez tuku z bioimpedance a ovlivňuje ji hydratace.</p>
+      <p class="muted note">Denní vážení silně kolísá (váha asi ±0,4 kg, tuk a lean mass ±0,7), proto je ve výchozím stavu zapnuté střední vyhlazení: exponenciální průměr s poločasem 10 dní u týdenních bodů (3 měsíce) a 30 dní u měsíčních bodů (rok, vše). Poločas musí být delší než jeden bod grafu, jinak by vyhlazení nebylo hladší než průměr za týden nebo měsíc. Bez vyhlazení je bod grafu průměr všech vážení za týden (3 měsíce) nebo za měsíc. Klepnutím na bod uvidíš hodnotu a změnu oproti předchozímu týdnu nebo měsíci. Změna tuku je v procentních bodech (b.). Lean mass je hmotnost bez tuku z bioimpedance a ovlivňuje ji hydratace.</p>
     </section>`;
 
   bodyBox.querySelectorAll('.seg[data-kind="metric"] button').forEach(b =>

@@ -8,6 +8,11 @@ const Body = (() => {
   // vyhlazení: poločas exponenciálního průměru ve dnech (0 = bez vyhlazení, v grafu průměr za období)
   const SMOOTHING = [['raw', 'Bez vyhlazení'], ['medium', 'Střední vyhlazení']];
   const HALF_LIFE = { raw: 0, light: 5, medium: 10, strong: 21 };
+  // Střední vyhlazení musí být delší než jeden bod grafu, jinak nevyhlazuje: měsíční bod bez vyhlazení je
+  // průměr za celý měsíc, takže poločas 10 dní by byl hrubší. Proto je poločas pro měsíční body delší.
+  const MEDIUM_HALF_LIFE = { '3M': 10, '1Y': 30, 'All': 30 };
+  const halfLifeFor = (smoothing, period) =>
+    smoothing === 'medium' ? (MEDIUM_HALF_LIFE[period] || HALF_LIFE.medium) : (HALF_LIFE[smoothing] || 0);
   const MAX_STALE_DAYS = 14;   // bod grafu se nevykreslí, pokud poslední vážení je starší než tolik dní
   const DAY = 86400000;
 
@@ -57,7 +62,8 @@ const Body = (() => {
 
   // body grafu: 3M po týdnech, 1Y a All po měsících (stejně jako u cviků)
   function series(rows, metric, smoothing, period, today) {
-    const pts = smooth(daily(rows), metric, HALF_LIFE[smoothing]);
+    const days = daily(rows);
+    const pts = smooth(days, metric, halfLifeFor(smoothing, period));
     const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     let from;
     const buckets = [];
@@ -93,14 +99,17 @@ const Body = (() => {
     const first = points[0] || null, last = points[points.length - 1] || null;
     const months = first && last ? (last.at - first.at) / 30.44 : 0;
     const change = first && last ? last.value - first.value : null;
+    // "Aktuálně" nezávisí na zvoleném období: u vyhlazení je to poslední hodnota průměru s poločasem 10 dní
+    const shortSmooth = smooth(days, metric, HALF_LIFE.medium);
+    const shortLast = shortSmooth[shortSmooth.length - 1] || null;
     return {
       from, end, buckets, points,
       min: values.length ? Math.min(...values) : null,
       max: values.length ? Math.max(...values) : null,
       avg: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
       change, perMonth: months > 0.25 ? change / months : null,
-      current: last ? last.value : null,
-      latestRaw: (() => { const raw = smooth(daily(rows), metric, 0); const r = raw[raw.length - 1]; return r ? { day: toDate(r.t), value: r.raw } : null; })()
+      current: last ? (smoothing === 'raw' || !shortLast ? last.value : shortLast.value) : null,
+      latestRaw: (() => { const raw = smooth(days, metric, 0); const r = raw[raw.length - 1]; return r ? { day: toDate(r.t), value: r.raw } : null; })()
     };
   }
 

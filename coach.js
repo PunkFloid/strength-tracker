@@ -46,8 +46,8 @@ const Coach = (() => {
       const avg = base[key] / weeks;
       const rated = avg >= CFG.minBaselinePerWeek;
       const ratio = avg > 0 ? cur[key] / avg : null;
-      const status = !rated || ratio === null ? 'na' : ratio >= 1 ? 'ok' : ratio >= CFG.laggingShare ? 'mid' : 'low';
-      return { key, label, current: cur[key], avg, ratio, status, lagging: status === 'low' };
+      const lagging = rated && cur[key] < CFG.laggingShare * avg;
+      return { key, label, current: cur[key], avg, ratio, lagging };
     });
     return { rows, lastDay, staleData: lastDay === null || tN - toNum(lastDay) > CFG.volumeWindowDays - 1 };
   }
@@ -128,21 +128,15 @@ if (typeof module !== 'undefined') module.exports = Coach;
     .tabs button.on { background: #4a4a5c; font-weight: 600; }
     main[data-tab="train"] .ov { display: none !important; }
     main[data-tab="overview"] #coach { display: none; }
-    .vm { background: #1a1a24; border-radius: 12px; padding: 12px 14px; margin-top: 10px; }
-    .vm-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .vm-name { font-weight: 600; font-size: 1rem; }
-    .pill { padding: 2px 9px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; background: #2e2e3d; color: #cfcfd8; }
-    .pill.ok { background: rgba(123,216,143,0.16); color: #7bd88f; }
-    .pill.mid { background: rgba(224,184,74,0.16); color: #e0b84a; }
-    .pill.low { background: rgba(224,64,94,0.18); color: #ff8fa5; }
-    .vm-track { position: relative; height: 10px; margin: 10px 0 8px; border-radius: 5px; background: #2e2e3d; }
-    .vm-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: #6a6a7c; }
-    .vm-track i.ok { background: #7bd88f; }
-    .vm-track i.mid { background: #e0b84a; }
-    .vm-track i.low { background: #e0405e; }
-    .vm-track u { position: absolute; left: 66.67%; top: -4px; bottom: -4px; width: 2px; background: #ffffff; opacity: 0.85; }
-    .vm-sub { display: flex; justify-content: space-between; font-size: 0.85rem; color: #8a8a99; }
-    .vm-sub b { color: #ffffff; font-size: 0.95rem; }
+    .vrow { padding: 10px 0; border-bottom: 1px solid #2e2e3d; }
+    .vrow:last-of-type { border-bottom: 0; }
+    .vtop { display: flex; justify-content: space-between; gap: 8px; font-size: 0.95rem; }
+    .vtop b.low { color: #e0405e; }
+    .vbar { position: relative; height: 8px; margin-top: 6px; border-radius: 4px; background: #1a1a24; }
+    .vbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: #4a4a5c; }
+    .vbar i.cur { background: #7bd88f; }
+    .vbar i.cur.low { background: #e0405e; }
+    .vbar u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #ffffff; }
     .tlist { list-style: none; padding: 0; margin: 0; }
     .tlist li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #2e2e3d; font-size: 0.95rem; }
     .tlist li:last-child { border-bottom: 0; }
@@ -192,14 +186,13 @@ if (typeof module !== 'undefined') module.exports = Coach;
     const tr = Coach.trends(sets, today);
     const rank = Coach.muscleRanking(tr.changes);
 
+    const scale = Math.max(1, ...vol.rows.map(r => Math.max(r.current, r.avg)));
     const volRows = vol.rows.map(r => {
-      const width = r.ratio === null ? 0 : Math.min(r.ratio, 1.5) / 1.5 * 100;
-      const pill = r.ratio === null ? 'bez průměru' : pct(r.ratio - 1);
+      const diff = r.ratio === null ? '' : ` (${pct(r.ratio - 1)})`;
       return `
-      <div class="vm">
-        <div class="vm-head"><span class="vm-name">${escapeHtml(r.label)}</span><span class="pill ${r.status}">${pill}</span></div>
-        <div class="vm-track"><i class="${r.status}" style="width:${width}%"></i><u></u></div>
-        <div class="vm-sub"><span><b>${fmtSets(r.current)}</b> sérií tento týden</span><span>průměr ${fmtSets(r.avg)}</span></div>
+      <div class="vrow">
+        <div class="vtop"><span>${escapeHtml(r.label)}</span><span><b class="${r.lagging ? 'low' : ''}">${fmtSets(r.current)}</b> sérií · průměr ${fmtSets(r.avg)}${diff}</span></div>
+        <div class="vbar"><i class="cur ${r.lagging ? 'low' : ''}" style="width:${Math.min(100, r.current / scale * 100)}%"></i><u style="left:${Math.min(100, r.avg / scale * 100)}%"></u></div>
       </div>`;
     }).join('');
     const staleMsg = vol.staleData
@@ -225,10 +218,10 @@ if (typeof module !== 'undefined') module.exports = Coach;
 
     box.innerHTML = `
       <section class="card">
-        <h2>Týdenní objem</h2>
-        <p class="muted tiny">Pracovní série za posledních 7 dní proti tvému průměru za předchozích 6 týdnů.</p>
+        <h2>Týdenní objem a rovnováha</h2>
+        <p class="muted tiny">Pracovní série za posledních 7 dní. Svislá čárka je průměr týdne za předchozích 6 týdnů.</p>
         ${staleMsg}${volRows}${lagMsg}
-        <p class="muted note">Bílá čárka je tvůj průměr (100 %), pruh se plní do 150 %. Zelená znamená průměr nebo víc, žlutá 70 až 99 %, červená pod 70 %, šedá málo dat (průměr pod 3 série týdně). Hlavní sval se počítá za 1 sérii, pomocný za 0,5.</p>
+        <p class="muted note">Hlavní sval se počítá za 1 sérii, pomocný za 0,5 (podle tabulky cviků). Zvýrazněný je sval s méně než 70 % svého průměru, pokud má průměr aspoň 3 série týdně.</p>
       </section>
       <section class="card">
         <h2>Stagnace</h2>
