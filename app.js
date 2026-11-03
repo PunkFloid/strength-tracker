@@ -392,7 +392,7 @@ function renderStrength() {
   const vals = key === 'overall' ? result.overall : result.muscles[key];
   const current = vals[vals.length - 1];
   const modeNote = strengthState.mode === 'form'
-    ? 'Forma: výkon z posledních tří tréninků cviku (nejnovější váží nejvíc), nový rekord ji zvedne výrazněji a po týdnu bez cviku klesá o 3 % týdně (nejvýš o 30 %). Vidíš tedy dopad pauz i slabších tréninků.'
+    ? 'Forma: aktuální stav síly. Vychází z úrovně Maxima a z odchylky posledních tréninků od normálu cviku (průměr předchozích asi 6 týdnů, odchylka nejvýš ±12 %). Nejnovější trénink váží nejvíc (po 4 dnech asi 37 %, po 8 dnech asi 14 %). Po týdnu bez cviku sval klesá o 3 % týdně (nejvýš o 30 %). Bod grafu je poslední hodnota týdne nebo měsíce; prázdné kolečko značí sval bez tréninku 14 a více dní.'
     : 'Maximum: nejlepší výkon cviku v klouzavém okně. Pauzy skóre nesnižují.';
 
   strengthBox.innerHTML = `
@@ -411,7 +411,7 @@ function renderStrength() {
       <div class="big">${range} <small>bodů</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
       ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches, yRange, v => intFmt.format(v) + ' bodů') : '<p class="muted pad">V tomto období nejsou data.</p>'}
-      <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.max) : '–'}</b></div>
+      <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.pr !== null && data.pr !== undefined ? data.pr : data.max) : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? intFmt.format(data.avg) : '–'}</b></div>
       <div class="row"><span>Aktuálně</span><b>${current === null ? 'málo dat' : intFmt.format(current)}</b></div>
       <p class="muted note">${modeNote} Osa Y je pro Formu i Maximum stejná, takže je můžeš přímo porovnat. 50 bodů odpovídá průměru prvních čtyř týdnů od září 2025, hodnota 60 znamená o 20 % vyšší odhad síly. Týdny před 1. 9. 2025 jsou orientační (prázdné kolečko) a mohou být pod 50. Sval se zobrazí, jen když má v posledních 6 týdnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR. Starší týdny se po nahrání nových dat mohou lehce posunout.</p>
@@ -449,7 +449,7 @@ function renderE1rm() {
       ${hasData ? LineChart.render(data, e1rmState.period, wideQuery.matches, v => numFmt.format(v) + ' kg') : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Osobní rekord</span><b>${hasData ? numFmt.format(data.pr) + ' kg' : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? numFmt.format(data.avg) + ' kg' : '–'}</b></div>
-      <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR (starý export a nohy bez RIR).</p>
+      <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Odhady 1RM jsou kalibrované po cvicích: výchozí sklon křivky je 2 pro horní tělo a 1 (Epley) pro nohy a cviky mimo tabulku svalů; u cviků s dostatkem dat se sklon doladí. Proto se čísla liší od čistého Epleyho vzorce a od MacroFactoru. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR (starý export a nohy bez RIR).</p>
     </section>`;
 
   e1rmBox.querySelector('#e1rmSelect').addEventListener('change', e => { e1rmState.exercise = e.target.value; renderE1rm(); });
@@ -464,7 +464,7 @@ function renderBody() {
   const metric = bodyState.metric;
   const info = Body.METRICS[metric];
 
-  // osa Y je společná pro obě varianty vyhlazení, aby se při přepínání nehýbala
+  // osa Y je společná pro obě varianty vyhlazení, aby se při přepínání nehybala
   const variants = {};
   for (const [k] of Body.SMOOTHING) variants[k] = Body.series(s.rows, metric, k, bodyState.period, today);
   const withData = Object.values(variants).filter(d => d.points.length > 0);
