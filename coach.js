@@ -187,7 +187,11 @@ if (typeof module !== 'undefined') module.exports = Coach;
     const rank = Coach.muscleRanking(tr.changes);
 
     const scale = Math.max(1, ...vol.rows.map(r => Math.max(r.current, r.avg)));
-    const volRows = vol.rows.map(r => {
+    // nejvíc trénované svaly nahoře: podle sérií za aktuální týden, při shodě podle průměru, pak podle původního pořadí
+    const volSorted = vol.rows.map((r, i) => ({ r, i }))
+      .sort((a, b) => b.r.current - a.r.current || b.r.avg - a.r.avg || a.i - b.i)
+      .map(x => x.r);
+    const volRows = volSorted.map(r => {
       const diff = r.ratio === null ? '' : ` (${pct(r.ratio - 1)})`;
       return `
       <div class="vrow">
@@ -219,7 +223,7 @@ if (typeof module !== 'undefined') module.exports = Coach;
     box.innerHTML = `
       <section class="card">
         <h2>Týdenní objem a rovnováha</h2>
-        <p class="muted tiny">Pracovní série za posledních 7 dní. Svislá čárka je průměr týdne za předchozích 6 týdnů.</p>
+        <p class="muted tiny">Pracovní série za posledních 7 dní. Svislá čárka je průměr týdne za předchozích 6 týdnů. Nahoře jsou nejvíc trénované svaly.</p>
         ${staleMsg}${volRows}${lagMsg}
         <p class="muted note">Hlavní sval se počítá za 1 sérii, pomocný za 0,5 (podle tabulky cviků). Zvýrazněný je sval s méně než 70 % svého průměru, pokud má průměr aspoň 3 série týdně.</p>
       </section>
