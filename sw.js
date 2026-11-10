@@ -1,5 +1,5 @@
 // sw.js - offline režim: nejdřív síť, při výpadku nebo pomalém spojení uložená kopie
-const CACHE = 'strength-tracker-v13';
+const CACHE = 'strength-tracker-v14';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
   'parser.js', 'exercises.js', 'normalize.js', 'e1rm.js', 'muscles.js', 'strength.js',

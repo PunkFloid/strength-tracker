@@ -3,9 +3,11 @@
 const BPlusTuning = (() => {
   // --- kalibrace sklonu křivky 1RM ---
   // 1RM = váha × (1 + k × min(opakování + RIR, 30) / 30) × perHandFactor
-  // Výchozí k: 2 pro cviky horního těla (z porovnání s MacroFactorem), 1 (Epley) pro nohy a cviky mimo tabulku svalů.
+  // Výchozí k: 2 pro cviky horního těla s činkami (z porovnání s MacroFactorem), 1,2 pro kabely a stroje na horní tělo
+  // (z porovnání s 1RM z exportu MacroFactoru, 11. 2026), 1 (Epley) pro nohy a cviky mimo tabulku svalů.
   // Pokud má cvik dost tréninků s různým počtem opakování, k se doladí z dat.
   const UPPER = { k: 2, maxEffectiveReps: 30 };
+  const CABLE_K = 1.2;
   const LEG_K = 1;
   const FIT = { minSessions: 6, minRepSpread: 5, kMin: 0.8, kMax: 2.5, step: 0.05, lambda: 0.1 };
 
@@ -13,7 +15,9 @@ const BPlusTuning = (() => {
     const w = Muscles.WEIGHTS[name];
     return !!w && !w.quads && !w.hamstrings;
   };
-  const priorK = name => (isUpperBody(name) ? UPPER.k : LEG_K);
+  // kabely a stroje (bez Smith machine, asistovaných cviků a crunch)
+  const isCableOrMachine = name => /cable|pin-loaded|plate-loaded|machine|pec deck|ez bar|bayesian/i.test(name) && !/smith|assisted|crunch/i.test(name);
+  const priorK = name => (!isUpperBody(name) ? LEG_K : (isCableOrMachine(name) ? CABLE_K : UPPER.k));
 
   let slopes = {};            // cvik -> doladěné k
   let calibratedFor = null;   // pole sérií, pro které se kalibrovalo naposledy
@@ -82,7 +86,7 @@ const BPlusTuning = (() => {
   // --- Forma v3 (0-10) ---
   // Forma ukazuje směr, ne úroveň: 0 = všechny svaly se zhoršují, 5 = stagnace, 10 = všechny rostou.
   // Cvik: nejlepší odhad 1RM za posledních 28 dní vs. nejlepší z předchozích 84 dní (stejná pravidla jako karta
-  // "Svaly podle posledních maxim" v záložce Trénink). Sval: vážený průměr změny jeho cviků. Overall: průměr svalů s daty.
+  // "Svaly podle posledních maxim" v záložece Trénink). Sval: vážený průměr změny jeho cviků. Overall: průměr svalů s daty.
   const FORM = {
     recentDays: 28,     // nedávné období = 4 týdny
     refDays: 84,        // srovnání s 12 týdny před ním
@@ -198,6 +202,6 @@ const BPlusTuning = (() => {
     return data;
   };
 
-  const api = { upperBodyCalibration: UPPER, isUpperBody, slopes, form: FORM, fit: FIT };
+  const api = { upperBodyCalibration: UPPER, cableK: CABLE_K, isUpperBody, isCableOrMachine, slopes, form: FORM, fit: FIT };
   return api;
 })();

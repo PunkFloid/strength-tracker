@@ -449,7 +449,7 @@ function renderE1rm() {
       ${hasData ? LineChart.render(data, e1rmState.period, wideQuery.matches, v => numFmt.format(v) + ' kg') : '<p class="muted pad">V tomto období nejsou data.</p>'}
       <div class="row"><span>Osobní rekord</span><b>${hasData ? numFmt.format(data.pr) + ' kg' : '–'}</b></div>
       <div class="row"><span>Tvůj průměr</span><b>${hasData ? numFmt.format(data.avg) + ' kg' : '–'}</b></div>
-      <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Odhady 1RM jsou kalibrované po cvicích: výchozí sklon křivky je 2 pro horní tělo a 1 (Epley) pro nohy a cviky mimo tabulku svalů; u cviků s dostatkem dat se sklon doladí. Proto se čísla liší od čistého Epleyho vzorce a od MacroFactoru. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR (starý export a nohy bez RIR).</p>
+      <p class="muted note">Každý bod je nejlepší výkon v týdnu (3 měsíce) nebo v měsíci. Odhady 1RM jsou kalibrované po cvicích: výchozí sklon křivky je 2 pro horní tělo s činkami, 1,2 pro kabely a stroje na horní tělo a 1 (Epley) pro nohy a cviky mimo tabulku svalů; u cviků s dostatkem dat se sklon doladí. Proto se čísla liší od čistého Epleyho vzorce a od MacroFactoru. Prázdné kolečko znamená, že hodnota vychází z odhadnutého RIR (starý export a nohy bez RIR).</p>
     </section>`;
 
   e1rmBox.querySelector('#e1rmSelect').addEventListener('change', e => { e1rmState.exercise = e.target.value; renderE1rm(); });
