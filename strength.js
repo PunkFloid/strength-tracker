@@ -4,13 +4,12 @@
 // (každý cvik má vlastní úroveň, trend je pro všechny cviky stejný).
 // Skóre = 50 × (trend vůči průměru prvních 4 týdnů od ANCHOR_DAY).
 // Režimy:
-//   'form' - výkon z posledních tréninků (nejnovější mají největší váhu), nový rekord ho zvedne
-//            výrazněji a pauza ho postupně snižuje
-//   'max'  - nejlepší výkon v okně
+//   'max'  - Maximum: nejlepší výkon cviku za posledních 12 týdnů (pevné okno), pauza skóre nesnižuje
+//   'form' - starý výpočet Formy (již se nepoužívá; Forma 0-10 je v bplus-tuning.js)
 const Strength = (() => {
-  const K_SESSIONS = 3;     // okno cviku má obsahovat aspoň tolik tréninků ...
+  const K_SESSIONS = 3;     // okno cviku (jen stará Forma) má obsahovat aspoň tolik tréninků ...
   const MIN_DAYS = 14;      // ... ale vždy aspoň posledních 14 dní ...
-  const MAX_DAYS = 84;      // ... a nejvýš 84 dní zpět
+  const MAX_DAYS = 84;      // ... a nejvýš 84 dní zpět; u Maxima je to pevné okno 12 týdnů
   // --- ladění režimu 'form' ---
   const FORM_WEIGHTS = [1, 0.3, 0.1];  // váhy tréninků od nejnovějšího
   const PR_BOOST = 0.5;     // nový rekord (nejlepší z posledních tréninků) posune výkon o tuto část k nejnovější hodnotě
@@ -84,6 +83,8 @@ const Strength = (() => {
     for (let t = minT + ((7 - dow) % 7); t <= todayN; t += STEP) dates.push(t);
     if (!dates.length || dates[dates.length - 1] < todayN) dates.push(todayN);
 
+    // Maximum: pevné okno 12 týdnů; stará Forma: okno podle četnosti cviku
+    const minDays = mode === 'max' ? MAX_DAYS : MIN_DAYS;
     // výkon cviku k danému dni (klouzavé okno)
     const perf = ts => {
       const E = new Map();
@@ -94,7 +95,7 @@ const Strength = (() => {
         for (let j = i; j >= 0; j--) {
           const { t, v } = arr[j];
           if (t <= ts - MAX_DAYS) break;
-          if (t > ts - MIN_DAYS || chosen.length < K_SESSIONS) chosen.push({ t, v });
+          if (t > ts - minDays || chosen.length < K_SESSIONS) chosen.push({ t, v });
           else break;
         }
         if (!chosen.length) continue;

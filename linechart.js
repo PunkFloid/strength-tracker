@@ -23,9 +23,16 @@ const LineChart = (() => {
     return ticks;
   }
 
+  // pevná osa (např. Forma 0-10): yRange má step, osa je přesně od min do max
+  function exactTicks(r) {
+    const ticks = [];
+    for (let t = r.min; t <= r.max + 1e-9; t += r.step) ticks.push(Math.round(t * 1000) / 1000);
+    return ticks;
+  }
+
   // wide = true: širší a nižší graf pro velké displeje (Mac, PC)
-  // yRange = { min, max }: volitelný pevný rozsah osy Y (pro porovnání více grafů)
-  // fmt = funkce, která z hodnoty udělá text do popisku: fmt(hodnota, měsíc/týden, předchozí měsíc/týden)
+  // yRange = { min, max }: volitelný pevný rozsah osy Y (pro porovnání více grafů); s položkou step je osa přesně od min do max
+  // fmt = funkce, která z hodnoty udělá text do popisku: fmt(hodnota, měsíc/týdem, předchozí měsíc/týdem)
   // Čtvrtý parametr může být buď yRange, nebo rovnou fmt; pátý je fmt.
   function render(data, period, wide, a, b) {
     const yRange = typeof a === 'function' ? null : a;
@@ -34,7 +41,7 @@ const LineChart = (() => {
     const n = data.buckets.length;
     if (!data.points.length || !n) return '';
     const format = fmt || (v => fmt0.format(v));
-    const ticks = ticksFor(yRange ? yRange.min : data.min, yRange ? yRange.max : data.max);
+    const ticks = yRange && yRange.step ? exactTicks(yRange) : ticksFor(yRange ? yRange.min : data.min, yRange ? yRange.max : data.max);
     const yMin = ticks[0], yMax = ticks[ticks.length - 1];
     const pw = W - LEFT - RIGHT, ph = H - TOP - BOTTOM;
     const colW = pw / n;
@@ -66,7 +73,7 @@ const LineChart = (() => {
     // čára
     const pts = data.buckets.map((b, i) => (b.value === null ? null : { x: xC(i), y: y(b.value), est: b.estimated, b })).filter(Boolean);
     if (pts.length > 1) svg += `<polyline points="${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" class="line"/>`;
-    // body + neviditelné větší kolečko pro snadné najetí / klepnutí
+    // body + neviditelné větší kolečko pro snadné najeďní / klepnutí
     let prevB = null;
     for (const p of pts) {
       const s = p.b.start;
@@ -81,7 +88,7 @@ const LineChart = (() => {
     return svg + '</svg>';
   }
 
-  // jedno společné ovládání pro všechny grafy: myš = najetí, dotyk = klepnutí
+  // jedno společné ovládání pro všechny grafy: myš = najeďní, dotyk = klepnutí
   if (typeof document !== 'undefined') {
     const hitOf = e => (e.target && e.target.closest ? e.target.closest('.hit') : null);
     const show = hit => {

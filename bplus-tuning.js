@@ -1,4 +1,4 @@
-// bplus-tuning.js - kalibrace 1RM po cvicích + Forma v2 (krátkodobá) + časová agregace Formy
+// bplus-tuning.js - kalibrace 1RM po cvicích + Forma v3 (0-10 podle svalů) + časová agregace Formy
 // Vkládá se po e1rm.js, muscles.js a strength.js, ale před app.js.
 const BPlusTuning = (() => {
   // --- kalibrace sklonu křivky 1RM ---
@@ -79,136 +79,95 @@ const BPlusTuning = (() => {
     return [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
   };
 
-  // --- Forma v2 ---
-  // Forma svalu = úroveň svalu z Maxima × odchylka posledních tréninků od normálu cviku × pokles po pauze.
+  // --- Forma v3 (0-10) ---
+  // Forma ukazuje směr, ne úroveň: 0 = všechny svaly se zhoršují, 5 = stagnace, 10 = všechny rostou.
+  // Cvik: nejlepší odhad 1RM za posledních 28 dní vs. nejlepší z předchozích 84 dní (stejná pravidla jako karta
+  // "Svaly podle posledních maxim" v záložce Trénink). Sval: vážený průměr změny jeho cviků. Overall: průměr svalů s daty.
   const FORM = {
-    tauDays: 4,          // čerstvost tréninku: exp(-dny / 4) -> 4 dny ≈ 37 %, 8 dní ≈ 14 %
-    normalDays: 42,      // normál cviku = průměr e1RM z předchozích tréninků za posledních 42 dní
-    clamp: 0.12,         // odchylka nejvýš ±12 %
-    freshDays: 28,       // starší tréninky se do odchylky už nepočítají
-    graceDays: 7,        // pokles po pauze začíná po 7 dnech bez cviku svalu
-    decayPerWeek: 0.03,  // 3 % za každý další týden
-    decayCap: 0.30,      // nejvýš 30 %
-    staleDays: 14        // starší poslední trénink -> prázdné kolečko
+    recentDays: 28,     // nedávné období = 4 týdny
+    refDays: 84,        // srovnání s 12 týdny před ním
+    minRecent: 2,       // cvik: aspoň 2 tréninky v nedávném období ...
+    minRef: 2,          // ... a aspoň 2 v referenčním
+    sensitivity: 0.05,  // změna +5 % a víc = 10 bodů, −5 % a méně = 0 bodů, 0 % = 5 bodů
+    step: 7             // bod Formy každý týden (poslední bod je dnešek)
   };
   const DAY_MS = 86400000;
   const toNum = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY_MS; };
+  const scoreOf = change => 5 + 5 * Math.max(-1, Math.min(1, change / FORM.sensitivity));
 
-  function lastIndexAtOrBefore(arr, t) {
-    let lo = 0, hi = arr.length - 1, res = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (arr[mid] <= t) { res = mid; lo = mid + 1; } else hi = mid - 1;
-    }
-    return res;
-  }
-
-  function computeForm(sets, today, baseCompute) {
-    const maxRes = baseCompute(sets, today, 'max');
-    if (!maxRes) return null;
-
+  function computeForm(sets, today) {
     const daily = new Map();
+    let minT = Infinity;
     for (const s of sets) {
       if (!s.eligible) continue;
+      const t = toNum(s.day), v = E1rm.setValue(s);
       if (!daily.has(s.exercise)) daily.set(s.exercise, new Map());
-      const dm = daily.get(s.exercise), t = toNum(s.day), v = E1rm.setValue(s);
+      const dm = daily.get(s.exercise);
       if (!dm.has(t) || v > dm.get(t)) dm.set(t, v);
+      if (t < minT) minT = t;
     }
     if (!daily.size) return null;
+    const sess = new Map();
+    for (const [ex, dm] of daily) sess.set(ex, [...dm].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t));
 
     const todayN = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) / DAY_MS;
-    const sess = new Map();
-    const allDays = new Set();
-    for (const [ex, dm] of daily) {
-      const arr = [...dm].map(([t, v]) => ({ t, v, dev: null })).sort((a, b) => a.t - b.t);
-      arr.forEach((c, i) => {
-        allDays.add(c.t);
-        let sum = 0, n = 0;
-        for (let j = i - 1; j >= 0 && arr[j].t > c.t - FORM.normalDays; j--) { sum += arr[j].v; n++; }
-        if (n) c.dev = Math.max(-FORM.clamp, Math.min(FORM.clamp, c.v / (sum / n) - 1));
-      });
-      sess.set(ex, arr);
-    }
-    const dates = [...allDays].filter(t => t <= todayN).sort((a, b) => a - b);
-    if (!dates.length || dates[dates.length - 1] < todayN) dates.push(todayN);
+    const dates = [];
+    for (let t = todayN; t >= minT; t -= FORM.step) dates.unshift(t);
+    if (!dates.length) dates.push(todayN);
 
-    const out = { dates, overall: [], muscles: {}, stale: {}, anchorN: maxRes.anchorN, mode: 'form' };
-    const ratio = {}, isStale = {};
-    for (const [key] of Muscles.LIST) {
-      const exs = [];
-      for (const ex of sess.keys()) { const w = Muscles.WEIGHTS[ex]; if (w && w[key]) exs.push([ex, w[key]]); }
-      const levels = maxRes.muscles[key];
-      out.muscles[key] = []; out.stale[key] = []; ratio[key] = []; isStale[key] = [];
-      dates.forEach(t => {
-        const i = lastIndexAtOrBefore(maxRes.dates, t);
-        const level = i >= 0 && levels ? levels[i] : null;
-        if (level === null || level === undefined || !exs.length) {
-          out.muscles[key].push(null); out.stale[key].push(false); ratio[key].push(null); isStale[key].push(false);
-          return;
-        }
-        let num = 0, den = 0, last = -Infinity;
-        for (const [ex, w] of exs) {
-          for (const c of sess.get(ex)) {
-            if (c.t > t) break;
-            if (c.t > last) last = c.t;
-            const age = t - c.t;
-            if (c.dev === null || age > FORM.freshDays) continue;
-            const wt = w * Math.exp(-age / FORM.tauDays);
-            num += wt * c.dev; den += wt;
-          }
-        }
-        const dev = den > 0 ? num / den : 0;
-        const sinceLast = last === -Infinity ? Infinity : t - last;
-        const decay = Math.min(FORM.decayCap, FORM.decayPerWeek * Math.max(0, sinceLast - FORM.graceDays) / 7);
-        const r = (1 + dev) * Math.exp(-decay);
-        out.muscles[key].push(level * r);
-        out.stale[key].push(sinceLast > FORM.staleDays);
-        ratio[key].push(r); isStale[key].push(sinceLast > FORM.staleDays);
-      });
-    }
-    out.stale.overall = [];
-    dates.forEach((t, k) => {
-      const i = lastIndexAtOrBefore(maxRes.dates, t);
-      const base = i >= 0 ? maxRes.overall[i] : null;
-      let logSum = 0, c = 0, allStale = true;
+    const out = { dates, overall: [], muscles: {}, anchorN: -Infinity, mode: 'form' };
+    for (const [key] of Muscles.LIST) out.muscles[key] = [];
+    dates.forEach(t => {
+      let sum = 0, count = 0;
       for (const [key] of Muscles.LIST) {
-        if (ratio[key][k] === null) continue;
-        logSum += Math.log(ratio[key][k]); c++;
-        if (!isStale[key][k]) allStale = false;
+        let num = 0, den = 0;
+        for (const [ex, arr] of sess) {
+          const w = (Muscles.WEIGHTS[ex] || {})[key];
+          if (!w) continue;
+          let rBest = -Infinity, rN = 0, fBest = -Infinity, fN = 0;
+          for (const p of arr) {
+            const age = t - p.t;
+            if (age < 0) break;
+            if (age < FORM.recentDays) { rN++; if (p.v > rBest) rBest = p.v; }
+            else if (age < FORM.recentDays + FORM.refDays) { fN++; if (p.v > fBest) fBest = p.v; }
+          }
+          if (rN < FORM.minRecent || fN < FORM.minRef) continue;
+          num += w * (rBest / fBest - 1);
+          den += w;
+        }
+        if (den > 0) {
+          const sc = scoreOf(num / den);
+          out.muscles[key].push(sc);
+          sum += sc; count++;
+        } else {
+          out.muscles[key].push(null);
+        }
       }
-      if (base === null || base === undefined || !c) { out.overall.push(null); out.stale.overall.push(false); }
-      else { out.overall.push(base * Math.exp(logSum / c)); out.stale.overall.push(allStale); }
+      out.overall.push(count ? sum / count : null);
     });
     return out;
   }
 
-  // Forma i Maximum počítají nejdřív kalibraci 1RM; Forma jde přes computeForm (při chybě se vrátí ke staré metodě)
+  // Forma i Maximum nejdřív kalibrují 1RM; Forma jde přes computeForm (0-10), Maximum přes původní výpočet
   const originalCompute = Strength.compute;
   Strength.compute = function (sets, today, mode) {
     calibrate(sets);
     if ((mode || 'form') === 'form') {
       try {
-        const r = computeForm(sets, today, originalCompute);
-        if (r) return r;
+        return computeForm(sets, today);
       } catch (err) {
-        console.warn('Forma v2 se nepodařila, použije se původní výpočet:', err);
+        console.warn('Forma se nepodařila spočítat:', err);
+        return null;
       }
     }
     return originalCompute(sets, today, mode);
   };
 
   // Forma se zobrazuje jako stav na konci týdne/měsíce; Maximum dál ukazuje nejvyšší bod.
-  // Body Formy starší než 14 dní od posledního tréninku svalu jsou označené jako odhad (prázdné kolečko).
   const originalSessionsFor = Strength.sessionsFor;
   Strength.sessionsFor = function (result, key) {
     const sessions = originalSessionsFor(result, key);
     sessions.aggregation = result.mode === 'form' ? 'last' : 'max';
-    const flags = result.stale && result.stale[key];
-    if (flags) {
-      const staleDays = new Set();
-      result.dates.forEach((d, i) => { if (flags[i]) staleDays.add(Strength.toIso(d)); });
-      for (const s of sessions) if (staleDays.has(s.day)) s.estimated = true;
-    }
     return sessions;
   };
 

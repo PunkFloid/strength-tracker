@@ -372,28 +372,28 @@ function renderMerged() {
 }
 
 function renderStrength() {
-  if (!strengthResults || !strengthResults[strengthState.mode]) { strengthBox.innerHTML = ''; return; }
+  if (!strengthResults) { strengthBox.innerHTML = ''; return; }
   const keys = [['overall', 'Overall'], ...Muscles.LIST];
   const key = strengthState.key;
   const today = new Date();
-
-  // obě varianty (Forma i Maximum) se počítají vždy a osa Y je pro ně společná
-  const byMode = {};
-  for (const [m] of MODES) byMode[m] = E1rm.series(Strength.sessionsFor(strengthResults[m], key), strengthState.period, today);
-  const withData = Object.values(byMode).filter(d => d.points.length > 0);
-  const yRange = withData.length ? { min: Math.min(...withData.map(d => d.min)), max: Math.max(...withData.map(d => d.max)) } : null;
-
-  const data = byMode[strengthState.mode];
-  const hasData = data.points.length > 0;
-  const lo = hasData ? intFmt.format(data.min) : '–';
-  const hi = hasData ? intFmt.format(data.max) : '–';
-  const range = !hasData ? '–' : (lo === hi ? lo : `${lo}–${hi}`);
+  const isForm = strengthState.mode === 'form';
   const result = strengthResults[strengthState.mode];
-  const vals = key === 'overall' ? result.overall : result.muscles[key];
-  const current = vals[vals.length - 1];
-  const modeNote = strengthState.mode === 'form'
-    ? 'Forma: aktuální stav síly. Vychází z úrovně Maxima a z odchylky posledních tréninků od normálu cviku (průměr předchozích asi 6 týdnů, odchylka nejvýš ±12 %). Nejnovější trénink váží nejvíc (po 4 dnech asi 37 %, po 8 dnech asi 14 %). Po týdnu bez cviku sval klesá o 3 % týdně (nejvýš o 30 %). Bod grafu je poslední hodnota týdne nebo měsíce; prázdné kolečko značí sval bez tréninku 14 a více dní.'
-    : 'Maximum: nejlepší výkon cviku v klouzavém okně. Pauzy skóre nesnižují.';
+
+  // Forma (0-10) a Maximum (body kolem 50) mají různé škály, proto každá má vlastní osu Y
+  const data = E1rm.series(result ? Strength.sessionsFor(result, key) : [], strengthState.period, today);
+  const hasData = data.points.length > 0;
+  const fmtV = v => (isForm ? numFmt.format(v) : intFmt.format(v));
+  const valTxt = v => (isForm ? numFmt.format(v) + ' z 10' : intFmt.format(v) + ' bodů');
+  const lo = hasData ? fmtV(data.min) : '–';
+  const hi = hasData ? fmtV(data.max) : '–';
+  const range = !hasData ? '–' : (lo === hi ? lo : `${lo}–${hi}`);
+  const vals = result ? (key === 'overall' ? result.overall : result.muscles[key]) : [];
+  const current = vals && vals.length ? vals[vals.length - 1] : null;
+  const hasCurrent = current !== null && current !== undefined;
+  const yRange = isForm ? { min: 0, max: 10, step: 5 } : null;
+  const modeNote = isForm
+    ? 'Forma ukazuje směr, ne úroveň: 0 = všechny svaly se zhoršují, 5 = stagnace, 10 = všechny rostou. U každého cviku se nejlepší odhad 1RM za poslední 4 týdny porovná s nejlepším z předchozích 12 týdnů (cvik potřebuje aspoň 2 tréninky v obou obdobích). Změna svalu je vážený průměr jeho cviků (hlavní sval 1, pomocný 0,5): +5 % a víc je 10, −5 % a méně je 0, beze změny je 5. Overall je průměr svalů, které mají data. Sval bez tréninku v posledních 4 týdnech se do Overall nepočítá a v grafu chybí. Bod grafu je poslední hodnota týdne nebo měsíce.'
+    : 'Maximum ukazuje aktuální úroveň síly: u každého cviku se bere nejlepší výkon za posledních 12 týdnů, z nich se pro každý sval odhadne společný trend a Overall je průměr svalů. Pauza skóre nesnižuje, klesne až když nejlepší výkon vypadne z 12týdenního okna. 50 bodů odpovídá průměru prvních čtyř týdnů od září 2025, hodnota 60 znamená o 20 % vyšší odhad síly. Týdny před 1. 9. 2025 jsou orientační (prázdné kolečko) a mohou být pod 50. Sval se zobrazí, jen když má v posledních 6 týdnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR. Starší týdny se po nahrání nových dat mohou lehce posunout.';
 
   strengthBox.innerHTML = `
     <section class="card strength">
@@ -407,14 +407,14 @@ function renderStrength() {
       <div class="seg" data-kind="mode">
         ${MODES.map(([k, label]) => `<button data-mode="${k}" class="${k === strengthState.mode ? 'on' : ''}">${label}</button>`).join('')}
       </div>
-      <p class="eyebrow">SKÓRE SÍLY · ${strengthState.mode === 'form' ? 'FORMA' : 'MAXIMUM'}</p>
-      <div class="big">${range} <small>bodů</small></div>
+      <p class="eyebrow">SKÓRE SÍLY · ${isForm ? 'FORMA' : 'MAXIMUM'}</p>
+      <div class="big">${range} <small>${isForm ? 'z 10' : 'bodů'}</small></div>
       <p class="muted">${dateFmt(data.from)} – ${dateFmt(data.end)}</p>
-      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches, yRange, v => intFmt.format(v) + ' bodů') : '<p class="muted pad">V tomto období nejsou data.</p>'}
-      <div class="row"><span>Osobní rekord</span><b>${hasData ? intFmt.format(data.pr !== null && data.pr !== undefined ? data.pr : data.max) : '–'}</b></div>
-      <div class="row"><span>Tvůj průměr</span><b>${hasData ? intFmt.format(data.avg) : '–'}</b></div>
-      <div class="row"><span>Aktuálně</span><b>${current === null ? 'málo dat' : intFmt.format(current)}</b></div>
-      <p class="muted note">${modeNote} Osa Y je pro Formu i Maximum stejná, takže je můžeš přímo porovnat. 50 bodů odpovídá průměru prvních čtyř týdnů od září 2025, hodnota 60 znamená o 20 % vyšší odhad síly. Týdny před 1. 9. 2025 jsou orientační (prázdné kolečko) a mohou být pod 50. Sval se zobrazí, jen když má v posledních 6 týdnech aspoň 6 pracovních sérií a aspoň jednu sérii s RIR. Starší týdny se po nahrání nových dat mohou lehce posunout.</p>
+      ${hasData ? LineChart.render(data, strengthState.period, wideQuery.matches, yRange, valTxt) : '<p class="muted pad">V tomto období nejsou data.</p>'}
+      <div class="row"><span>${isForm ? 'Nejvyšší hodnota' : 'Osobní rekord'}</span><b>${hasData ? valTxt(data.pr !== null && data.pr !== undefined ? data.pr : data.max) : '–'}</b></div>
+      <div class="row"><span>Tvůj průměr</span><b>${hasData ? valTxt(data.avg) : '–'}</b></div>
+      <div class="row"><span>Aktuálně</span><b>${hasCurrent ? valTxt(current) : 'málo dat'}</b></div>
+      <p class="muted note">${modeNote}</p>
     </section>`;
 
   strengthBox.querySelector('#strengthSelect').addEventListener('change', e => { strengthState.key = e.target.value; renderStrength(); });
