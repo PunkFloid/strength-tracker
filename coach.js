@@ -10,9 +10,10 @@ const Coach = (() => {
     recordsShown: 5,          // kolik posledních maxim se zobrazí
     recordGain: 0.01,         // maximum musí překonat dřívější maximum aspoň o 1 %
     recordMinPrior: 2,        // aspoň 2 dřívější tréninky cviku
-    recentDays: 28,           // "nedávné" období = 4 týdny
-    refDays: 84,              // porovnává se s tréninky 28 až 111 dní zpět
-    plateauMinRecent: 3,      // stagnace: aspoň 3 tréninky za posledních 28 dní
+    recentDays: 28,           // "nedávné" období pro pořadí svalů = 4 týdny
+    refDays: 84,              // porovnává se s předchozími 12 týdny před nedávným obdobím
+    stagWindows: { '3W': 21, '3M': 91 },  // období stagnace: 3 týdny / 3 měsíce
+    plateauMinRecent: 3,      // stagnace: aspoň 3 tréninky v nedávném období
     plateauMinRef: 2,         // stagnace: aspoň 2 tréninky v referenčním období
     plateauBand: 0.97,        // 97 % a víc = stagnace, méně = výkon pod dřívějším maximem
     muscleMinRecent: 2,       // pořadí svalů: cvik má aspoň 2 tréninky za 28 dní ...
@@ -63,7 +64,9 @@ const Coach = (() => {
     return null;
   }
 
-  function trends(sets, today) {
+  // recentDays = délka nedávného období ve dnech (výchozí 28); referenční období jsou 12 týdnů před ním
+  function trends(sets, today, recentDays) {
+    const rd = recentDays || CFG.recentDays;
     const tN = todayNum(today);
     const records = [], plateaus = [], changes = [];
     for (const info of E1rm.exerciseList(sets)) {
@@ -74,8 +77,8 @@ const Coach = (() => {
       const rec = latestRecord(sess, info.name, info.perHand);
       if (rec) records.push(rec);
 
-      const recent = sess.filter(s => s.age <= CFG.recentDays - 1);
-      const ref = sess.filter(s => s.age >= CFG.recentDays && s.age <= CFG.recentDays + CFG.refDays - 1);
+      const recent = sess.filter(s => s.age <= rd - 1);
+      const ref = sess.filter(s => s.age >= rd && s.age <= rd + CFG.refDays - 1);
       if (!recent.length || !ref.length) continue;
       const m = Math.max(...recent.map(s => s.value)), p = Math.max(...ref.map(s => s.value));
       const ratio = m / p;
@@ -110,7 +113,26 @@ const Coach = (() => {
     return rows;
   }
 
-  return { CFG, weeklyVolume, trends, muscleRanking };
+  // stagnace celých svalů: vážený průměr změny cviků svalu (stejná pravidla a prahy jako u cviků)
+  function musclePlateaus(changes) {
+    const rows = [];
+    for (const [key, label] of Muscles.LIST) {
+      let num = 0, den = 0, n = 0;
+      for (const c of changes) {
+        if (c.recent < CFG.plateauMinRecent || c.ref < CFG.plateauMinRef) continue;
+        const w = (Muscles.WEIGHTS[c.name] || {})[key];
+        if (!w) continue;
+        num += w * (c.ratio - 1); den += w; n++;
+      }
+      if (den <= 0) continue;
+      const change = num / den;
+      if (change < CFG.recordGain) rows.push({ key, label, n, change, status: change + 1 >= CFG.plateauBand ? 'stagnuje' : 'pod' });
+    }
+    rows.sort((a, b) => a.change - b.change);
+    return rows;
+  }
+
+  return { CFG, weeklyVolume, trends, muscleRanking, musclePlateaus };
 })();
 if (typeof module !== 'undefined') module.exports = Coach;
 
@@ -170,10 +192,23 @@ if (typeof module !== 'undefined') module.exports = Coach;
   }
   bar.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.tab); });
 
+  const STAG_LABELS = { '3W': '3 týdny', '3M': '3 měsíce' };
+  let stagKey = '3W';
+  try { const saved = localStorage.getItem('st:stag'); if (saved && STAG_LABELS[saved]) stagKey = saved; } catch (e) { /* bez ukládání */ }
+  box.addEventListener('click', e => {
+    const b = e.target.closest('button[data-stag]');
+    if (!b || !STAG_LABELS[b.dataset.stag]) return;
+    stagKey = b.dataset.stag;
+    try { localStorage.setItem('st:stag', stagKey); } catch (err) { /* bez ukládání */ }
+    renderCoach();
+  });
+
   const fmtSets = n => (Math.round(n * 2) / 2).toString().replace('.', ',');
   const pct = r => `${r >= 0 ? '+' : '−'}${Math.round(Math.abs(r) * 100)} %`;
   const dayCz = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d}. ${m}. ${y}`; };
   const kg = v => v.toFixed(1).replace('.', ',') + ' kg';
+  const nWorkouts = n => `${n} ${n === 1 ? 'trénink' : n < 5 ? 'tréninky' : 'tréninků'}`;
+  const nExercises = n => `${n} ${n === 1 ? 'cvik' : n < 5 ? 'cviky' : 'cviků'}`;
 
   function renderCoach() {
     const sets = (typeof mergedSets !== 'undefined' && mergedSets) ? mergedSets : [];
@@ -185,6 +220,9 @@ if (typeof module !== 'undefined') module.exports = Coach;
     const vol = Coach.weeklyVolume(sets, today);
     const tr = Coach.trends(sets, today);
     const rank = Coach.muscleRanking(tr.changes);
+    const stagLabel = STAG_LABELS[stagKey];
+    const trStag = Coach.trends(sets, today, Coach.CFG.stagWindows[stagKey]);
+    const musclePlat = Coach.musclePlateaus(trStag.changes);
 
     const scale = Math.max(1, ...vol.rows.map(r => Math.max(r.current, r.avg)));
     // nejvíc trénované svaly nahoře: podle sérií za aktuální týden, při shodě podle průměru, pak podle původního pořadí
@@ -205,15 +243,22 @@ if (typeof module !== 'undefined') module.exports = Coach;
     const lagMsg = lagging.length && !vol.staleData
       ? `<p class="note">Pod 70 % svého průměru: <b>${lagging.map(r => escapeHtml(r.label)).join(', ')}</b>.</p>` : '';
 
-    const platList = tr.plateaus.length
-      ? `<ul class="tlist">${tr.plateaus.map(p => `<li><span>${escapeHtml(p.name)}<small>${p.status === 'stagnuje' ? 'stagnuje' : 'pod dřívějším maximem'} · ${p.recent} tréninky za 4 týdny${p.perHand ? ' · na jednu činku' : ''}</small></span><b>${kg(p.best)} <span class="${p.status === 'stagnuje' ? 'flat' : 'neg'}">(${pct(p.ratio - 1)})</span></b></li>`).join('')}</ul>`
-      : '<p class="muted">Žádný cvik nestagnuje.</p>';
+    const stagToggle = `<div class="seg" data-kind="stag">${Object.keys(STAG_LABELS).map(k =>
+      `<button data-stag="${k}" class="${k === stagKey ? 'on' : ''}">${STAG_LABELS[k]}</button>`).join('')}</div>`;
+
+    const platList = trStag.plateaus.length
+      ? `<ul class="tlist">${trStag.plateaus.map(p => `<li><span>${escapeHtml(p.name)}<small>${p.status === 'stagnuje' ? 'stagnuje' : 'pod dřívějším maximem'} · ${nWorkouts(p.recent)} za ${stagLabel}${p.perHand ? ' · na jednu činku' : ''}</small></span><b>${kg(p.best)} <span class="${p.status === 'stagnuje' ? 'flat' : 'neg'}">(${pct(p.ratio - 1)})</span></b></li>`).join('')}</ul>`
+      : `<p class="muted">Žádný cvik nestagnuje (za ${stagLabel}).</p>`;
+
+    const musclePlatList = musclePlat.length
+      ? `<ul class="tlist">${musclePlat.map(m => `<li><span>${escapeHtml(m.label)}<small>${m.status === 'stagnuje' ? 'stagnuje' : 'pod dřívějším maximem'} · ${nExercises(m.n)}</small></span><b class="${m.status === 'stagnuje' ? 'flat' : 'neg'}">${pct(m.change)}</b></li>`).join('')}</ul>`
+      : `<p class="muted">Žádný sval nestagnuje (za ${stagLabel}).</p>`;
 
     const rankList = `<ul class="tlist">${rank.map((r, i) => {
       if (r.change === null) return `<li><span><span class="rank">${i + 1}.</span>${escapeHtml(r.label)}<small>málo dat za poslední 4 týdny</small></span><b class="flat">–</b></li>`;
       const cls = r.change >= 0.005 ? 'pos' : r.change <= -0.005 ? 'neg' : 'flat';
       const arrow = r.change >= 0.005 ? '▲' : r.change <= -0.005 ? '▼' : '■';
-      return `<li><span><span class="rank">${i + 1}.</span>${escapeHtml(r.label)}<small>${r.n} ${r.n === 1 ? 'cvik' : r.n < 5 ? 'cviky' : 'cviků'}</small></span><b class="${cls}">${arrow} ${pct(r.change)}</b></li>`;
+      return `<li><span><span class="rank">${i + 1}.</span>${escapeHtml(r.label)}<small>${nExercises(r.n)}</small></span><b class="${cls}">${arrow} ${pct(r.change)}</b></li>`;
     }).join('')}</ul>`;
 
     const recList = tr.records.length
@@ -229,9 +274,16 @@ if (typeof module !== 'undefined') module.exports = Coach;
       </section>
       <section class="card">
         <h2>Stagnace</h2>
-        <p class="muted tiny">Cviky s aspoň 3 tréninky za 4 týdny, jejichž nejlepší odhad 1RM nepřekonal maximum z předchozích 12 týdnů o 1 %. Stagnace je do −3 %, níže už je výkon pod dřívějším maximem.</p>
+        ${stagToggle}
+        <p class="muted tiny">Cviky s aspoň 3 tréninky za ${stagLabel}, jejichž nejlepší odhad 1RM nepřekonal maximum z předchozích 12 týdnů o 1 %. Stagnace je do −3 %, níže už je výkon pod dřívějším maximem.</p>
         ${platList}
         <p class="muted note">Při stagnaci zvaž lehčí týden (deload) nebo změnu rozsahu opakování. Jde o orientační pravidlo podle odhadů 1RM, ne o jistotu: odhad kolísá s RIR a počtem opakování.</p>
+      </section>
+      <section class="card">
+        <h2>Stagnace svalů</h2>
+        <p class="muted tiny">Stejné období jako výše (${stagLabel}). Sval se bere jako vážený průměr změny cviků, které splňují stejná pravidla jako u stagnace cviků. Zobrazené jsou svaly, jejichž průměr nepřekonal předchozí maximum o 1 %; nejhorší nahoře.</p>
+        ${musclePlatList}
+        <p class="muted note">Hlavní sval má váhu 1, pomocný 0,5 (podle tabulky cviků). Sval bez cviků s dostatkem tréninků se nehodnotí, takže tu nemusí být všechny.</p>
       </section>
       <section class="card">
         <h2>Svaly podle posledních maxim</h2>
